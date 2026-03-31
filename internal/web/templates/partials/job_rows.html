@@ -7,7 +7,7 @@
   <td><a href="/jobs/{{.ID}}">{{.Title}}</a></td>
   <td>{{.Company}}</td>
   <td>{{.Location}}</td>
-  <td>{{if .Salary}}{{.Salary}}{{else}}—{{end}}</td>
+  <td>{{if .ExtractedSalary}}{{.ExtractedSalary}}{{else if .Salary}}{{.Salary}}{{else}}—{{end}}</td>
   <td><span class="status-badge status-{{.Status}}">{{.Status}}</span></td>
   <td>{{.DiscoveredAt.Format "Jan 2, 2006"}}</td>
   <td>
@@ -29,6 +29,13 @@
     {{end}}
   </td>
 </tr>
+{{if .Summary}}
+<tr>
+  <td colspan="7" style="padding:0.2em 1em 0.8em;font-size:0.85em;color:#555;border-top:none;">
+    {{.Summary}}
+  </td>
+</tr>
+{{end}}
 {{end}}
 {{end}}
 {{end}}

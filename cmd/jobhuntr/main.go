@@ -65,7 +65,10 @@ func main() {
 
 	src := scraper.NewSerpAPISource(cfg.Scraper.SerpAPIKey)
 	ntfyNotifier := notifier.NewNtfyNotifier(cfg.Ntfy.Server, cfg.Ntfy.Topic, cfg.Server.BaseURL)
-	sched := scraper.NewScheduler(src, db, filters, interval, logger).WithNotifier(ntfyNotifier)
+	summarizer := generator.NewAnthropicSummarizer(cfg.Claude.APIKey, "")
+	sched := scraper.NewScheduler(src, db, filters, interval, logger).
+		WithNotifier(ntfyNotifier).
+		WithSummarizer(summarizer)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

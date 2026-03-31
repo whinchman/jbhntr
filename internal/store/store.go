@@ -36,28 +36,32 @@ type ListJobsFilter struct {
 	Search string
 	Limit  int
 	Offset int
+	Sort   string // column name (must be validated by caller)
+	Order  string // "asc" or "desc" (must be validated by caller)
 }
 
 const schema = `
 CREATE TABLE IF NOT EXISTS jobs (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    external_id   TEXT    NOT NULL,
-    source        TEXT    NOT NULL,
-    title         TEXT    NOT NULL DEFAULT '',
-    company       TEXT    NOT NULL DEFAULT '',
-    location      TEXT    NOT NULL DEFAULT '',
-    description   TEXT    NOT NULL DEFAULT '',
-    salary        TEXT    NOT NULL DEFAULT '',
-    apply_url     TEXT    NOT NULL DEFAULT '',
-    status        TEXT    NOT NULL DEFAULT 'discovered'
-                  CHECK(status IN ('discovered','notified','approved','rejected','generating','complete','failed')),
-    resume_html   TEXT    NOT NULL DEFAULT '',
-    cover_html    TEXT    NOT NULL DEFAULT '',
-    resume_pdf    TEXT    NOT NULL DEFAULT '',
-    cover_pdf     TEXT    NOT NULL DEFAULT '',
-    error_msg     TEXT    NOT NULL DEFAULT '',
-    discovered_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-    updated_at    DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    external_id      TEXT    NOT NULL,
+    source           TEXT    NOT NULL,
+    title            TEXT    NOT NULL DEFAULT '',
+    company          TEXT    NOT NULL DEFAULT '',
+    location         TEXT    NOT NULL DEFAULT '',
+    description      TEXT    NOT NULL DEFAULT '',
+    salary           TEXT    NOT NULL DEFAULT '',
+    apply_url        TEXT    NOT NULL DEFAULT '',
+    status           TEXT    NOT NULL DEFAULT 'discovered'
+                     CHECK(status IN ('discovered','notified','approved','rejected','generating','complete','failed')),
+    summary          TEXT    NOT NULL DEFAULT '',
+    extracted_salary TEXT    NOT NULL DEFAULT '',
+    resume_html      TEXT    NOT NULL DEFAULT '',
+    cover_html       TEXT    NOT NULL DEFAULT '',
+    resume_pdf       TEXT    NOT NULL DEFAULT '',
+    cover_pdf        TEXT    NOT NULL DEFAULT '',
+    error_msg        TEXT    NOT NULL DEFAULT '',
+    discovered_at    DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at       DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     UNIQUE(external_id, source)
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status       ON jobs(status);
@@ -106,6 +110,14 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: migrate schema: %w", err)
 	}
 
+	// Add columns that may not exist in older databases.
+	for _, col := range []string{
+		"ALTER TABLE jobs ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE jobs ADD COLUMN extracted_salary TEXT NOT NULL DEFAULT ''",
+	} {
+		db.Exec(col) // ignore "duplicate column" errors
+	}
+
 	return &Store{db: db}, nil
 }
 
@@ -152,7 +164,7 @@ func (s *Store) CreateJob(ctx context.Context, job *models.Job) (bool, error) {
 func (s *Store) GetJob(ctx context.Context, id int64) (*models.Job, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, external_id, source, title, company, location, description, salary, apply_url,
-		       status, resume_html, cover_html, resume_pdf, cover_pdf, error_msg,
+		       status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg,
 		       discovered_at, updated_at
 		FROM jobs WHERE id = ?`, id)
 
@@ -181,11 +193,19 @@ func (s *Store) ListJobs(ctx context.Context, f ListJobsFilter) ([]models.Job, e
 		args = append(args, like, like, like)
 	}
 
-	q := "SELECT id, external_id, source, title, company, location, description, salary, apply_url, status, resume_html, cover_html, resume_pdf, cover_pdf, error_msg, discovered_at, updated_at FROM jobs"
+	q := "SELECT id, external_id, source, title, company, location, description, salary, apply_url, status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg, discovered_at, updated_at FROM jobs"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY discovered_at DESC"
+	sortCol := f.Sort
+	if sortCol == "" {
+		sortCol = "discovered_at"
+	}
+	sortDir := "DESC"
+	if f.Order == "asc" {
+		sortDir = "ASC"
+	}
+	q += " ORDER BY " + sortCol + " " + sortDir
 
 	limit := f.Limit
 	if limit <= 0 {
@@ -235,6 +255,18 @@ func (s *Store) UpdateJobStatus(ctx context.Context, id int64, newStatus models.
 	)
 	if err != nil {
 		return fmt.Errorf("store: update job status: %w", err)
+	}
+	return nil
+}
+
+// UpdateJobSummary sets the AI-generated summary and extracted salary on a job.
+func (s *Store) UpdateJobSummary(ctx context.Context, id int64, summary, extractedSalary string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE jobs SET summary = ?, extracted_salary = ?, updated_at = ? WHERE id = ?",
+		summary, extractedSalary, time.Now().UTC().Format(time.RFC3339), id,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update job summary: %w", err)
 	}
 	return nil
 }
@@ -299,7 +331,7 @@ func scanJob(s scanner) (*models.Job, error) {
 		&job.ID, &job.ExternalID, &job.Source,
 		&job.Title, &job.Company, &job.Location,
 		&job.Description, &job.Salary, &job.ApplyURL,
-		&status,
+		&status, &job.Summary, &job.ExtractedSalary,
 		&job.ResumeHTML, &job.CoverHTML, &job.ResumePDF, &job.CoverPDF,
 		&job.ErrorMsg,
 		&discoveredAt, &updatedAt,

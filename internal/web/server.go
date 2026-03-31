@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -148,18 +149,80 @@ func (s *Server) Handler() http.Handler {
 	return r
 }
 
+// columnDef drives a single sortable column header in the dashboard template.
+type columnDef struct {
+	Key       string // DB column key (e.g. "title")
+	Label     string // Display name
+	Arrow     string // "▲", "▼", or "" if not the active sort column
+	NextOrder string // The order value to use when this header is clicked
+}
+
+// sortableColumns are the columns the dashboard can be sorted by.
+var sortableColumns = []struct{ key, label string }{
+	{"title", "Title"},
+	{"company", "Company"},
+	{"location", "Location"},
+	{"salary", "Salary"},
+	{"status", "Status"},
+	{"discovered_at", "Date"},
+}
+
+// allowedSortColumns prevents SQL injection via the sort parameter.
+var allowedSortColumns = map[string]bool{
+	"title": true, "company": true, "location": true,
+	"salary": true, "status": true, "discovered_at": true,
+}
+
+func buildColumns(activeSort, activeOrder string) []columnDef {
+	cols := make([]columnDef, len(sortableColumns))
+	for i, sc := range sortableColumns {
+		col := columnDef{Key: sc.key, Label: sc.label}
+		if sc.key == activeSort {
+			if activeOrder == "asc" {
+				col.Arrow = "\u25B2"
+				col.NextOrder = "desc"
+			} else {
+				col.Arrow = "\u25BC"
+				col.NextOrder = "asc"
+			}
+		} else {
+			col.NextOrder = "asc"
+		}
+		cols[i] = col
+	}
+	return cols
+}
+
 type dashboardData struct {
 	Jobs         []models.Job
 	Statuses     []models.JobStatus
 	ActiveStatus string
 	Search       string
+	Sort         string
+	Order        string
+	Columns      []columnDef
+}
+
+func parseSortParams(q url.Values) (string, string) {
+	sort := q.Get("sort")
+	order := q.Get("order")
+	if !allowedSortColumns[sort] {
+		sort = "discovered_at"
+	}
+	if order != "asc" {
+		order = "desc"
+	}
+	return sort, order
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	sort, order := parseSortParams(q)
 	f := store.ListJobsFilter{
 		Status: models.JobStatus(q.Get("status")),
 		Search: q.Get("q"),
+		Sort:   sort,
+		Order:  order,
 	}
 	jobs, err := s.store.ListJobs(r.Context(), f)
 	if err != nil {
@@ -174,6 +237,9 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Statuses:     allStatuses,
 		ActiveStatus: string(f.Status),
 		Search:       f.Search,
+		Sort:         sort,
+		Order:        order,
+		Columns:      buildColumns(sort, order),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -183,9 +249,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	sort, order := parseSortParams(q)
 	f := store.ListJobsFilter{
 		Status: models.JobStatus(q.Get("status")),
 		Search: q.Get("q"),
+		Sort:   sort,
+		Order:  order,
 	}
 	jobs, err := s.store.ListJobs(r.Context(), f)
 	if err != nil {

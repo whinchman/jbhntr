@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -65,11 +67,26 @@ func (s *SerpAPISource) Search(ctx context.Context, filter models.SearchFilter) 
 	params := url.Values{}
 	params.Set("engine", "google_jobs")
 	params.Set("api_key", s.apiKey)
-	if filter.Keywords != "" {
-		params.Set("q", filter.Keywords)
+
+	q := filter.Keywords
+	location := filter.Location
+
+	// SerpAPI doesn't accept "remote" as a location. Fold it into the
+	// query string instead so Google Jobs treats it as a keyword filter.
+	if strings.EqualFold(location, "remote") {
+		if q != "" {
+			q += " remote"
+		} else {
+			q = "remote"
+		}
+		location = ""
 	}
-	if filter.Location != "" {
-		params.Set("location", filter.Location)
+
+	if q != "" {
+		params.Set("q", q)
+	}
+	if location != "" {
+		params.Set("location", location)
 	}
 
 	reqURL := s.baseURL + "?" + params.Encode()
@@ -85,7 +102,8 @@ func (s *SerpAPISource) Search(ctx context.Context, filter models.SearchFilter) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("scraper: serpapi returned status %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("scraper: serpapi returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var apiResp serpAPIResponse

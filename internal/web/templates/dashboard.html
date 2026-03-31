@@ -32,19 +32,22 @@
        hx-include="[name='q']"
        value="{{.Search}}">
 
-<div hx-get="/partials/job-table?status={{.ActiveStatus}}&q={{.Search}}"
+<div hx-get="/partials/job-table?status={{.ActiveStatus}}&q={{.Search}}&sort={{.Sort}}&order={{.Order}}"
      hx-trigger="every 30s"
      hx-target="#job-table-body"
      hx-swap="innerHTML">
   <table>
     <thead>
       <tr>
-        <th>Title</th>
-        <th>Company</th>
-        <th>Location</th>
-        <th>Salary</th>
-        <th>Status</th>
-        <th>Date</th>
+        {{- $base := printf "status=%s&q=%s" .ActiveStatus .Search -}}
+        {{- range .Columns -}}
+        <th style="cursor:pointer;user-select:none;"
+            hx-get="/partials/job-table?{{$base}}&sort={{.Key}}&order={{.NextOrder}}"
+            hx-target="#job-table-body"
+            hx-swap="innerHTML">
+          {{.Label}}{{if .Arrow}} {{.Arrow}}{{end}}
+        </th>
+        {{- end -}}
         <th>Actions</th>
       </tr>
     </thead>

@@ -28,23 +28,25 @@ func (s JobStatus) Valid() bool {
 
 // Job represents a single job listing stored in the database.
 type Job struct {
-	ID           int64
-	ExternalID   string
-	Source       string
-	Title        string
-	Company      string
-	Location     string
-	Description  string
-	Salary       string
-	ApplyURL     string
-	Status       JobStatus
-	ResumeHTML   string
-	CoverHTML    string
-	ResumePDF    string
-	CoverPDF     string
-	ErrorMsg     string
-	DiscoveredAt time.Time
-	UpdatedAt    time.Time
+	ID              int64
+	ExternalID      string
+	Source          string
+	Title           string
+	Company         string
+	Location        string
+	Description     string
+	Salary          string
+	ApplyURL        string
+	Status          JobStatus
+	Summary         string
+	ExtractedSalary string
+	ResumeHTML      string
+	CoverHTML       string
+	ResumePDF       string
+	CoverPDF        string
+	ErrorMsg        string
+	DiscoveredAt    time.Time
+	UpdatedAt       time.Time
 }
 
 // SearchFilter represents a single job search query configuration.

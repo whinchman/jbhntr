@@ -3,9 +3,11 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -66,9 +68,45 @@ type OutputConfig struct {
 
 var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)
 
+// loadDotenv reads a .env file and sets any variables not already in the
+// environment. It silently does nothing if the file doesn't exist.
+func loadDotenv(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		// Only set if not already in the environment (explicit env takes priority).
+		if os.Getenv(key) == "" {
+			os.Setenv(key, val)
+		}
+	}
+}
+
 // Load reads a YAML config file, substitutes ${ENV_VAR} placeholders,
-// and returns the parsed Config.
+// and returns the parsed Config. It loads .env from the config file's
+// directory before substitution so secrets don't need to be exported.
 func Load(path string) (*Config, error) {
+	// Try loading .env from the same directory as the config file.
+	dir := "."
+	if i := strings.LastIndexAny(path, "/\\"); i >= 0 {
+		dir = path[:i]
+	}
+	loadDotenv(dir + "/.env")
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: read file: %w", err)

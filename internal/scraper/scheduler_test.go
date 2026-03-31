@@ -73,6 +73,10 @@ func (m *mockStore) UpdateJobStatus(_ context.Context, _ int64, _ models.JobStat
 	return nil
 }
 
+func (m *mockStore) UpdateJobSummary(_ context.Context, _ int64, _, _ string) error {
+	return nil
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 func job(ext, source string) models.Job {

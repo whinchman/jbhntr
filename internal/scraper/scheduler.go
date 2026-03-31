@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/whinchman/jobhuntr/internal/generator"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/notifier"
 	"github.com/whinchman/jobhuntr/internal/store"
@@ -17,16 +18,18 @@ type StoreWriter interface {
 	CreateJob(ctx context.Context, job *models.Job) (bool, error)
 	CreateScrapeRun(ctx context.Context, run *store.ScrapeRun) error
 	UpdateJobStatus(ctx context.Context, id int64, status models.JobStatus) error
+	UpdateJobSummary(ctx context.Context, id int64, summary, extractedSalary string) error
 }
 
 // Scheduler periodically searches all configured filters and persists new jobs.
 type Scheduler struct {
-	source   Source
-	store    StoreWriter
-	notifier notifier.Notifier
-	filters  []models.SearchFilter
-	interval time.Duration
-	logger   *slog.Logger
+	source     Source
+	store      StoreWriter
+	notifier   notifier.Notifier
+	summarizer generator.Summarizer
+	filters    []models.SearchFilter
+	interval   time.Duration
+	logger     *slog.Logger
 
 	mu           sync.Mutex
 	lastScrapeAt time.Time
@@ -55,10 +58,15 @@ func NewScheduler(source Source, st StoreWriter, filters []models.SearchFilter, 
 }
 
 // WithNotifier sets an optional Notifier on the Scheduler.
-// When set, Notify is called for each newly discovered job and the job status
-// is updated to "notified" on success.
 func (s *Scheduler) WithNotifier(n notifier.Notifier) *Scheduler {
 	s.notifier = n
+	return s
+}
+
+// WithSummarizer sets an optional Summarizer on the Scheduler.
+// When set, each newly discovered job is summarized via Claude.
+func (s *Scheduler) WithSummarizer(sum generator.Summarizer) *Scheduler {
+	s.summarizer = sum
 	return s
 }
 
@@ -132,6 +140,22 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 		"new", run.JobsNew,
 		"duration", run.FinishedAt.Sub(started),
 	)
+
+	if s.summarizer != nil {
+		for i, job := range newJobs {
+			summary, salary, err := s.summarizer.Summarize(ctx, job)
+			if err != nil {
+				s.logger.Error("failed to summarize job", "job_id", job.ID, "error", err)
+				continue
+			}
+			if err := s.store.UpdateJobSummary(ctx, job.ID, summary, salary); err != nil {
+				s.logger.Error("failed to save job summary", "job_id", job.ID, "error", err)
+				continue
+			}
+			newJobs[i].Summary = summary
+			newJobs[i].ExtractedSalary = salary
+		}
+	}
 
 	if s.notifier != nil {
 		for _, job := range newJobs {
