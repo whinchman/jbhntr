@@ -4,6 +4,12 @@ Features moved here after merge to the default branch.
 
 ## Phase 1: Foundation
 
+### 1C: SQLite Store (merged 2026-03-31)
+- internal/store: Open(WAL mode), auto-migrate jobs+scrape_runs schema
+- CreateJob (INSERT OR IGNORE dedup), GetJob, ListJobs, UpdateJobStatus, UpdateJobGenerated, CreateScrapeRun
+- State machine transition enforcement (discovered→notified→approved→generating→complete/failed)
+- 20 in-memory SQLite tests
+
 ### 1B: Config & Models (merged 2026-03-31)
 - internal/models: Job struct (all DB fields + timestamps), JobStatus constants + Valid(), SearchFilter
 - table-driven tests for all 7 status constants and invalid inputs

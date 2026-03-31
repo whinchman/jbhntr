@@ -15,7 +15,7 @@ Completed work is moved to DONE.md after each feature merge.
 - [x] Implement config loading from config.yaml with env var substitution (replace ${VAR} with os.Getenv), define all data models in internal/models/: Job struct (all DB fields), JobStatus string type with constants (Discovered/Notified/Approved/Rejected/Generating/Complete/Failed) and a Valid() method, SearchFilter struct (Keywords/Location/MinSalary/MaxSalary/Title). Write tests for config parsing (including env var substitution) and model validation
 
 ### 1C: SQLite Store
-- [ ] Implement SQLite store in internal/store/ using modernc.org/sqlite with database/sql: auto-migrate schema on Open() (jobs table with all fields + UNIQUE(external_id,source) + CHECK on status + indexes on status and discovered_at, scrape_runs table), implement CreateJob (INSERT OR IGNORE for dedup returning whether inserted), GetJob, ListJobs(filter by status, search text via LIKE, pagination), UpdateJobStatus (with valid transition check), UpdateJobGenerated (set HTML+PDF paths), CreateScrapeRun, and write comprehensive tests using in-memory SQLite
+- [x] Implement SQLite store in internal/store/ using modernc.org/sqlite with database/sql: auto-migrate schema on Open() (jobs table with all fields + UNIQUE(external_id,source) + CHECK on status + indexes on status and discovered_at, scrape_runs table), implement CreateJob (INSERT OR IGNORE for dedup returning whether inserted), GetJob, ListJobs(filter by status, search text via LIKE, pagination), UpdateJobStatus (with valid transition check), UpdateJobGenerated (set HTML+PDF paths), CreateScrapeRun, and write comprehensive tests using in-memory SQLite
 
 ## Phase 2: Scraping
 
