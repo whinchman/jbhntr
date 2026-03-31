@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/whinchman/jobhuntr/internal/models"
+	"github.com/whinchman/jobhuntr/internal/notifier"
 	"github.com/whinchman/jobhuntr/internal/store"
 )
 
@@ -14,12 +15,14 @@ import (
 type StoreWriter interface {
 	CreateJob(ctx context.Context, job *models.Job) (bool, error)
 	CreateScrapeRun(ctx context.Context, run *store.ScrapeRun) error
+	UpdateJobStatus(ctx context.Context, id int64, status models.JobStatus) error
 }
 
 // Scheduler periodically searches all configured filters and persists new jobs.
 type Scheduler struct {
 	source   Source
 	store    StoreWriter
+	notifier notifier.Notifier
 	filters  []models.SearchFilter
 	interval time.Duration
 	logger   *slog.Logger
@@ -37,6 +40,14 @@ func NewScheduler(source Source, st StoreWriter, filters []models.SearchFilter, 
 		interval: interval,
 		logger:   logger,
 	}
+}
+
+// WithNotifier sets an optional Notifier on the Scheduler.
+// When set, Notify is called for each newly discovered job and the job status
+// is updated to "notified" on success.
+func (s *Scheduler) WithNotifier(n notifier.Notifier) *Scheduler {
+	s.notifier = n
+	return s
 }
 
 // RunOnce executes one full scrape cycle across all search filters.
@@ -105,6 +116,18 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 		"new", run.JobsNew,
 		"duration", run.FinishedAt.Sub(started),
 	)
+
+	if s.notifier != nil {
+		for _, job := range newJobs {
+			if err := s.notifier.Notify(ctx, job); err != nil {
+				s.logger.Error("failed to send notification", "job_id", job.ID, "error", err)
+				continue
+			}
+			if err := s.store.UpdateJobStatus(ctx, job.ID, models.StatusNotified); err != nil {
+				s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
+			}
+		}
+	}
 
 	return newJobs, nil
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/models"
+	"github.com/whinchman/jobhuntr/internal/notifier"
 	"github.com/whinchman/jobhuntr/internal/scraper"
 	"github.com/whinchman/jobhuntr/internal/store"
 )
@@ -58,7 +59,8 @@ func main() {
 	}
 
 	src := scraper.NewSerpAPISource(cfg.Scraper.SerpAPIKey)
-	sched := scraper.NewScheduler(src, db, filters, interval, logger)
+	ntfyNotifier := notifier.NewNtfyNotifier(cfg.Ntfy.Server, cfg.Ntfy.Topic, cfg.Server.BaseURL)
+	sched := scraper.NewScheduler(src, db, filters, interval, logger).WithNotifier(ntfyNotifier)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
