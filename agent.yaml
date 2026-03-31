@@ -14,8 +14,17 @@ git:
 workflow:
   plans_dir: "plans"
   worktrees_dir: "worktrees"
-  backlog_file: "TODO.md"
-  done_file: "DONE.md"
+  # Workflow pipeline (4-stage: backlog → unready → todo → done)
+  #   backlog_file:  Raw unprocessed features (intake queue)
+  #   unready_file:  Researched/planned by agents, awaiting stakeholder approval
+  #   todo_file:     Stakeholder-approved, ready for worker agents
+  #   done_file:     Completed and merged
+  #   bugs_file:     Bugs found by QA and Code Reviewer agents
+  backlog_file: "workflow/BACKLOG.md"
+  unready_file: "workflow/UNREADY.md"
+  todo_file: "workflow/TODO.md"
+  done_file: "workflow/DONE.md"
+  bugs_file: "workflow/BUGS.md"
 
 testing:
   enabled: true
@@ -46,3 +55,19 @@ code_standards: |
   - No global state; pass dependencies via struct fields
   - Keep functions under 50 lines where practical
   - bin/ directory is in .gitignore
+
+# =============================================================================
+# Agent type system (optional — omit this section for single-agent behavior)
+# =============================================================================
+
+agents:
+  # Where agent type definitions live (each subfolder has a CLAUDE.md)
+  types_dir: "agents"
+  # Default agent type when --type is not specified
+  default_type: "coder"
+  # Directory for inter-agent task files (Manager writes, workers read)
+  tasks_dir: "tasks"
+  # Maximum concurrent worker agents (used by future orchestration scripts)
+  max_workers: 3
+  # Available types: manager, architect, coder, code-reviewer, designer, automation, qa
+  # Add your own by creating agents/<type>/CLAUDE.md

@@ -6,3 +6,15 @@ output/
 .env
 worktrees/
 config.yaml
+worktrees/*
+!worktrees/.gitkeep
+tasks/*
+!tasks/.gitkeep
+.claude/projects/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

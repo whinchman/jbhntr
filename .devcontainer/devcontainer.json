@@ -1,0 +1,14 @@
+{
+  "name": "jobhuntr Agent Dev",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "agent",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "bierner.markdown-preview-github-styles"
+      ]
+    }
+  },
+  "remoteUser": "agent"
+}
