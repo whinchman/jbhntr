@@ -10,11 +10,14 @@ import (
 	"syscall"
 	"time"
 
+	"net/http"
+
 	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/notifier"
 	"github.com/whinchman/jobhuntr/internal/scraper"
 	"github.com/whinchman/jobhuntr/internal/store"
+	"github.com/whinchman/jobhuntr/internal/web"
 )
 
 func main() {
@@ -73,7 +76,31 @@ func main() {
 		cancel()
 	}()
 
+	// Start HTTP server.
+	webSrv := web.NewServer(db)
+	httpServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler: webSrv.Handler(),
+	}
+	go func() {
+		slog.Info("http server listening", "addr", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("http server error", "error", err)
+		}
+	}()
+
+	// Start background scheduler.
 	slog.Info("starting scheduler", "interval", interval, "filters", len(filters))
-	sched.Start(ctx)
+	go sched.Start(ctx)
+
+	// Block until shutdown signal.
+	<-ctx.Done()
+
+	// Gracefully stop HTTP server.
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutCancel()
+	if err := httpServer.Shutdown(shutCtx); err != nil {
+		slog.Error("http server shutdown error", "error", err)
+	}
 	slog.Info("jobhuntr stopped")
 }
