@@ -82,7 +82,7 @@ func main() {
 	defer pdfConverter.Close()
 
 	claudeGen := generator.NewAnthropicGenerator(cfg.Claude.APIKey, cfg.Claude.Model)
-	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, 30*time.Second, logger)
+	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, cfg.Resume.Path, 30*time.Second, logger)
 
 	// Start HTTP server.
 	webSrv := web.NewServerWithConfig(db, cfg, *cfgPath, cfg.Resume.Path).

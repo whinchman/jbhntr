@@ -239,6 +239,18 @@ func (s *Store) UpdateJobStatus(ctx context.Context, id int64, newStatus models.
 	return nil
 }
 
+// UpdateJobError sets the error message and transitions a job to failed status.
+func (s *Store) UpdateJobError(ctx context.Context, id int64, errMsg string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE jobs SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
+		string(models.StatusFailed), errMsg, time.Now().UTC().Format(time.RFC3339), id,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update job error: %w", err)
+	}
+	return nil
+}
+
 // UpdateJobGenerated sets the generated HTML and PDF paths on a job.
 func (s *Store) UpdateJobGenerated(ctx context.Context, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
 	_, err := s.db.ExecContext(ctx, `

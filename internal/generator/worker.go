@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -18,6 +19,7 @@ type WorkerStore interface {
 	ListJobs(ctx context.Context, f store.ListJobsFilter) ([]models.Job, error)
 	UpdateJobStatus(ctx context.Context, id int64, status models.JobStatus) error
 	UpdateJobGenerated(ctx context.Context, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error
+	UpdateJobError(ctx context.Context, id int64, errMsg string) error
 }
 
 // Worker polls for approved jobs, generates documents, and converts them to PDF.
@@ -26,12 +28,13 @@ type Worker struct {
 	generator    Generator
 	converter    pdf.Converter
 	outputDir    string
+	resumePath   string
 	pollInterval time.Duration
 	logger       *slog.Logger
 }
 
 // NewWorker creates a Worker. pollInterval=0 defaults to 30s.
-func NewWorker(store WorkerStore, gen Generator, conv pdf.Converter, outputDir string, pollInterval time.Duration, logger *slog.Logger) *Worker {
+func NewWorker(store WorkerStore, gen Generator, conv pdf.Converter, outputDir, resumePath string, pollInterval time.Duration, logger *slog.Logger) *Worker {
 	if pollInterval <= 0 {
 		pollInterval = 30 * time.Second
 	}
@@ -43,6 +46,7 @@ func NewWorker(store WorkerStore, gen Generator, conv pdf.Converter, outputDir s
 		generator:    gen,
 		converter:    conv,
 		outputDir:    outputDir,
+		resumePath:   resumePath,
 		pollInterval: pollInterval,
 		logger:       logger,
 	}
@@ -87,7 +91,17 @@ func (w *Worker) processJob(ctx context.Context, job models.Job) {
 		return
 	}
 
-	resumeHTML, coverHTML, err := w.generator.Generate(ctx, job, "")
+	baseResume := ""
+	if w.resumePath != "" {
+		data, err := os.ReadFile(w.resumePath)
+		if err != nil {
+			log.Error("failed to read base resume", "error", err, "path", w.resumePath)
+		} else {
+			baseResume = string(data)
+		}
+	}
+
+	resumeHTML, coverHTML, err := w.generator.Generate(ctx, job, baseResume)
 	if err != nil {
 		log.Error("generation failed", "error", err)
 		w.failJob(ctx, job.ID, err.Error())
@@ -125,8 +139,7 @@ func (w *Worker) processJob(ctx context.Context, job models.Job) {
 }
 
 func (w *Worker) failJob(ctx context.Context, id int64, errMsg string) {
-	if err := w.store.UpdateJobStatus(ctx, id, models.StatusFailed); err != nil {
-		w.logger.Error("failed to set status failed", "job_id", id, "error", err)
+	if err := w.store.UpdateJobError(ctx, id, errMsg); err != nil {
+		w.logger.Error("failed to set job error", "job_id", id, "error", err)
 	}
-	_ = errMsg // stored in error_msg field — UpdateJobStatus doesn't take error msg
 }

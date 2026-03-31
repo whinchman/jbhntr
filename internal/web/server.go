@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -287,7 +288,7 @@ func (s *Server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job.Status = models.StatusApproved
-	writeJSON(w, http.StatusOK, job)
+	s.respondJobAction(w, r, job)
 }
 
 func (s *Server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
@@ -315,6 +316,18 @@ func (s *Server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job.Status = models.StatusRejected
+	s.respondJobAction(w, r, job)
+}
+
+// respondJobAction returns HTML for HTMX requests and JSON for API clients.
+func (s *Server) respondJobAction(w http.ResponseWriter, r *http.Request, job *models.Job) {
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := s.templates.ExecuteTemplate(w, "job_rows", []models.Job{*job}); err != nil {
+			slog.Error("template render error", "error", err)
+		}
+		return
+	}
 	writeJSON(w, http.StatusOK, job)
 }
 
@@ -436,13 +449,30 @@ func (s *Server) filtersSnapshot() []config.SearchFilter {
 	return out
 }
 
-// writeConfig marshals s.cfg to YAML and writes it to s.configPath.
+// writeConfig reads the existing config file, updates only the search_filters
+// section, and writes it back. This avoids overwriting env var placeholders
+// (like ${ANTHROPIC_API_KEY}) with expanded secret values.
 // Caller must hold s.mu.
 func (s *Server) writeConfig() error {
 	if s.cfg == nil || s.configPath == "" {
 		return nil
 	}
-	data, err := yaml.Marshal(s.cfg)
+
+	existing, err := os.ReadFile(s.configPath)
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+
+	// Parse the raw YAML into a generic map to preserve env var placeholders.
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(existing, &raw); err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+
+	// Only update the search_filters key with the in-memory values.
+	raw["search_filters"] = s.cfg.SearchFilters
+
+	data, err := yaml.Marshal(raw)
 	if err != nil {
 		return err
 	}

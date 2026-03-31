@@ -21,13 +21,11 @@
   {{if or (eq .Job.Status "discovered") (eq .Job.Status "notified")}}
   &nbsp;
   <button hx-post="/api/jobs/{{.Job.ID}}/approve"
-          hx-target="#status-section"
-          hx-swap="outerHTML"
+          hx-on::after-request="location.reload()"
           class="outline contrast"
           style="padding:0.3em 0.8em;">Approve</button>
   <button hx-post="/api/jobs/{{.Job.ID}}/reject"
-          hx-target="#status-section"
-          hx-swap="outerHTML"
+          hx-on::after-request="location.reload()"
           class="outline"
           style="padding:0.3em 0.8em;">Reject</button>
   {{end}}

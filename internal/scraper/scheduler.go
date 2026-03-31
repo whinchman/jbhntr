@@ -148,13 +148,16 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 	return newJobs, nil
 }
 
-// Start launches a background goroutine that calls RunOnce at each interval tick.
+// Start runs an initial scrape immediately, then repeats at each interval tick.
 // It returns when ctx is cancelled.
 func (s *Scheduler) Start(ctx context.Context) {
+	s.logger.Info("scheduler started", "interval", s.interval)
+
+	// Run first scrape immediately instead of waiting for the first tick.
+	s.runAndLog(ctx)
+
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
-
-	s.logger.Info("scheduler started", "interval", s.interval)
 
 	for {
 		select {
@@ -162,12 +165,16 @@ func (s *Scheduler) Start(ctx context.Context) {
 			s.logger.Info("scheduler stopped")
 			return
 		case <-ticker.C:
-			newJobs, err := s.RunOnce(ctx)
-			if err != nil {
-				s.logger.Error("scrape run failed", "error", err)
-				continue
-			}
-			s.logger.Info("scrape run complete", "new_jobs", len(newJobs))
+			s.runAndLog(ctx)
 		}
 	}
+}
+
+func (s *Scheduler) runAndLog(ctx context.Context) {
+	newJobs, err := s.RunOnce(ctx)
+	if err != nil {
+		s.logger.Error("scrape run failed", "error", err)
+		return
+	}
+	s.logger.Info("scrape run complete", "new_jobs", len(newJobs))
 }

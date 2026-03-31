@@ -109,6 +109,17 @@ func (m *mockWorkerStore) UpdateJobGenerated(_ context.Context, id int64, resume
 	return nil
 }
 
+func (m *mockWorkerStore) UpdateJobError(_ context.Context, id int64, errMsg string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updates = append(m.updates, statusUpdate{id, models.StatusFailed})
+	if j, ok := m.jobs[id]; ok {
+		j.Status = models.StatusFailed
+		j.ErrorMsg = errMsg
+	}
+	return nil
+}
+
 // ─── tests ────────────────────────────────────────────────────────────────────
 
 func TestWorker_processApproved(t *testing.T) {
@@ -124,7 +135,7 @@ func TestWorker_processApproved(t *testing.T) {
 		gen := &mockGenerator{resumeHTML: "<h1>Resume</h1>", coverHTML: "<h1>Cover</h1>"}
 		conv := &mockConverter{}
 
-		w := NewWorker(ms, gen, conv, t.TempDir(), 0, nil)
+		w := NewWorker(ms, gen, conv, t.TempDir(), "", 0, nil)
 		if err := w.processApproved(ctx); err != nil {
 			t.Fatalf("processApproved() error = %v", err)
 		}
@@ -164,7 +175,7 @@ func TestWorker_processApproved(t *testing.T) {
 		gen := &mockGenerator{err: errors.New("api down")}
 		conv := &mockConverter{}
 
-		w := NewWorker(ms, gen, conv, t.TempDir(), 0, nil)
+		w := NewWorker(ms, gen, conv, t.TempDir(), "", 0, nil)
 		w.processApproved(ctx)
 
 		lastStatus := ms.updates[len(ms.updates)-1].status
@@ -178,7 +189,7 @@ func TestWorker_processApproved(t *testing.T) {
 		gen := &mockGenerator{}
 		conv := &mockConverter{}
 
-		w := NewWorker(ms, gen, conv, t.TempDir(), 0, nil)
+		w := NewWorker(ms, gen, conv, t.TempDir(), "", 0, nil)
 		if err := w.processApproved(ctx); err != nil {
 			t.Fatalf("processApproved() error = %v", err)
 		}
@@ -191,7 +202,7 @@ func TestWorker_processApproved(t *testing.T) {
 func TestWorker_Start(t *testing.T) {
 	t.Run("stops cleanly on context cancellation", func(t *testing.T) {
 		ms := newMockWorkerStore()
-		w := NewWorker(ms, &mockGenerator{}, &mockConverter{}, t.TempDir(), 50*time.Millisecond, nil)
+		w := NewWorker(ms, &mockGenerator{}, &mockConverter{}, t.TempDir(), "", 50*time.Millisecond, nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 		defer cancel()
