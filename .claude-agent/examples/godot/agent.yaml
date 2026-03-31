@@ -1,0 +1,33 @@
+project:
+  name: "my-godot-game"
+  description: "A Godot 4.6 game built with GDScript"
+
+git:
+  default_branch: "development"
+  feature_prefix: "feature/"
+  commit_style: "conventional"
+
+workflow:
+  plans_dir: "plans"
+  worktrees_dir: "worktrees"
+  backlog_file: "TODO.md"
+  done_file: "DONE.md"
+
+testing:
+  enabled: true
+  command: "godot --headless -d -s res://addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_subdirs -gexit --path /workspace/game"
+  test_dir: "game/tests/unit/"
+  test_pattern: "test_*.gd"
+
+build:
+  command: ""
+
+code_standards: |
+  - All game code goes under game/
+  - Tests go in game/tests/unit/ or game/tests/integration/
+  - Test files must be named test_<name>.gd and extend GutTest
+  - Use Godot Resource files (.tres) for data definitions
+  - Use signals and an events bus for decoupled communication
+  - Keep scenes small and focused -- one scene per UI component or game system
+  - Always commit .gd.uid files (Godot 4.6 stable script references)
+  - Run Godot commands with: godot --headless --path /workspace/game

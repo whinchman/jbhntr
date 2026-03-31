@@ -1,0 +1,7 @@
+bin/
+output/
+*.db
+*.db-wal
+*.db-shm
+.env
+worktrees/

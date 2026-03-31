@@ -1,0 +1,48 @@
+# =============================================================================
+# agent.yaml — JobHuntr autonomous agent configuration
+# =============================================================================
+
+project:
+  name: "jobhuntr"
+  description: "Headless Go app: scrape job boards (SerpAPI Google Jobs), notify via ntfy.sh, generate tailored resumes/cover letters with Claude API, serve web dashboard with HTMX"
+
+git:
+  default_branch: "main"
+  feature_prefix: "feature/"
+  commit_style: "conventional"
+
+workflow:
+  plans_dir: "plans"
+  worktrees_dir: "worktrees"
+  backlog_file: "TODO.md"
+  done_file: "DONE.md"
+
+testing:
+  enabled: true
+  command: "go test ./..."
+  test_dir: "./"
+  test_pattern: "*_test.go"
+
+build:
+  command: "go build -o bin/jobhuntr ./cmd/jobhuntr"
+
+code_standards: |
+  - All source code under cmd/ and internal/
+  - Follow standard Go project layout: cmd/jobhuntr/main.go as entry point
+  - Use log/slog for structured logging (never fmt.Println for logs)
+  - Use context.Context for cancellation and timeouts throughout
+  - Database: modernc.org/sqlite (pure Go, no CGO required)
+  - HTTP router: github.com/go-chi/chi/v5
+  - Claude API client: github.com/liushuangls/go-anthropic/v2
+  - Job scraping: github.com/serpapi/serpapi-golang (SerpAPI Google Jobs)
+  - PDF generation: github.com/go-rod/rod (headless Chromium)
+  - Config: gopkg.in/yaml.v3 with ${ENV_VAR} interpolation for secrets
+  - Web UI: Go html/template + HTMX (no JS framework, no build step)
+  - CSS: Pico CSS via CDN (no local copy needed)
+  - Embed templates and static assets with //go:embed directives
+  - Use interfaces for all external dependencies (Source, Notifier, Generator)
+  - Table-driven tests with t.Run subtests
+  - Error wrapping with fmt.Errorf("context: %w", err)
+  - No global state; pass dependencies via struct fields
+  - Keep functions under 50 lines where practical
+  - bin/ directory is in .gitignore

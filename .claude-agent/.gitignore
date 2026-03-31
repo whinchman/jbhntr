@@ -1,0 +1,17 @@
+# Worktrees (created and destroyed by the agent)
+worktrees/*
+!worktrees/.gitkeep
+
+# Claude project-level memory (contains local paths and session data)
+.claude/projects/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

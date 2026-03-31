@@ -1,0 +1,32 @@
+project:
+  name: "my-rust-app"
+  description: "A Rust application"
+
+git:
+  default_branch: "main"
+  feature_prefix: "feature/"
+  commit_style: "conventional"
+
+workflow:
+  plans_dir: "plans"
+  worktrees_dir: "worktrees"
+  backlog_file: "TODO.md"
+  done_file: "DONE.md"
+
+testing:
+  enabled: true
+  command: "cargo test"
+  test_dir: "tests/"
+  test_pattern: "*_test.rs"
+
+build:
+  command: "cargo build"
+
+code_standards: |
+  - Run cargo fmt before committing
+  - Run cargo clippy and fix all warnings
+  - Source code in src/
+  - Integration tests in tests/
+  - Unit tests as #[cfg(test)] modules in the source files
+  - Document public APIs with /// doc comments
+  - Use thiserror for error types
