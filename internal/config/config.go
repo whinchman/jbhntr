@@ -1,0 +1,88 @@
+// Package config loads and parses the jobhuntr YAML configuration file,
+// substituting ${ENV_VAR} placeholders with values from the environment.
+package config
+
+import (
+	"fmt"
+	"os"
+	"regexp"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Config is the root configuration object.
+type Config struct {
+	Server        ServerConfig   `yaml:"server"`
+	Scraper       ScraperConfig  `yaml:"scraper"`
+	SearchFilters []SearchFilter `yaml:"search_filters"`
+	Ntfy          NtfyConfig     `yaml:"ntfy"`
+	Claude        ClaudeConfig   `yaml:"claude"`
+	Resume        ResumeConfig   `yaml:"resume"`
+	Output        OutputConfig   `yaml:"output"`
+}
+
+// ServerConfig holds HTTP server settings.
+type ServerConfig struct {
+	Port    int    `yaml:"port"`
+	BaseURL string `yaml:"base_url"`
+}
+
+// ScraperConfig holds scraping settings.
+type ScraperConfig struct {
+	Interval   string `yaml:"interval"`
+	SerpAPIKey string `yaml:"serpapi_key"`
+}
+
+// SearchFilter represents a single job search query.
+type SearchFilter struct {
+	Keywords  string `yaml:"keywords"`
+	Location  string `yaml:"location"`
+	MinSalary int    `yaml:"min_salary"`
+	MaxSalary int    `yaml:"max_salary"`
+	Title     string `yaml:"title"`
+}
+
+// NtfyConfig holds ntfy.sh notification settings.
+type NtfyConfig struct {
+	Topic  string `yaml:"topic"`
+	Server string `yaml:"server"`
+}
+
+// ClaudeConfig holds Anthropic Claude API settings.
+type ClaudeConfig struct {
+	APIKey string `yaml:"api_key"`
+	Model  string `yaml:"model"`
+}
+
+// ResumeConfig points to the base resume file.
+type ResumeConfig struct {
+	Path string `yaml:"path"`
+}
+
+// OutputConfig specifies where generated files are written.
+type OutputConfig struct {
+	Dir string `yaml:"dir"`
+}
+
+var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+// Load reads a YAML config file, substitutes ${ENV_VAR} placeholders,
+// and returns the parsed Config.
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: read file: %w", err)
+	}
+
+	expanded := envVarRe.ReplaceAllStringFunc(string(data), func(match string) string {
+		name := envVarRe.FindStringSubmatch(match)[1]
+		return os.Getenv(name)
+	})
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+		return nil, fmt.Errorf("config: parse yaml: %w", err)
+	}
+
+	return &cfg, nil
+}
