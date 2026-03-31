@@ -13,8 +13,10 @@ import (
 	"net/http"
 
 	"github.com/whinchman/jobhuntr/internal/config"
+	"github.com/whinchman/jobhuntr/internal/generator"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/notifier"
+	"github.com/whinchman/jobhuntr/internal/pdf"
 	"github.com/whinchman/jobhuntr/internal/scraper"
 	"github.com/whinchman/jobhuntr/internal/store"
 	"github.com/whinchman/jobhuntr/internal/web"
@@ -88,6 +90,18 @@ func main() {
 			slog.Error("http server error", "error", err)
 		}
 	}()
+
+	// Start PDF converter and background worker.
+	pdfConverter, err := pdf.NewRodConverter()
+	if err != nil {
+		slog.Error("failed to start PDF converter", "error", err)
+		os.Exit(1)
+	}
+	defer pdfConverter.Close()
+
+	claudeGen := generator.NewAnthropicGenerator(cfg.Claude.APIKey, cfg.Claude.Model)
+	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, 30*time.Second, logger)
+	go worker.Start(ctx)
 
 	// Start background scheduler.
 	slog.Info("starting scheduler", "interval", interval, "filters", len(filters))
