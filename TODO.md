@@ -28,7 +28,7 @@ Completed work is moved to DONE.md after each feature merge.
 ## Phase 3: Notifications & Web API
 
 ### 3A: Ntfy Notifier
-- [ ] Implement Notifier in internal/notifier/notifier.go: Notify(ctx, job) error that POSTs to ntfy.sh/{topic} with JSON body containing title ("New: {job.Title} at {job.Company}"), message (location + salary if available), click URL pointing to web dashboard job detail ({base_url}/jobs/{id}), priority 3 (default), and tags ["briefcase"]. Wire into scheduler: after each scrape, for every newly created job, call Notify and update status to "notified". Write tests using httptest to verify the POST payload format
+- [x] Implement Notifier in internal/notifier/notifier.go: Notify(ctx, job) error that POSTs to ntfy.sh/{topic} with JSON body containing title ("New: {job.Title} at {job.Company}"), message (location + salary if available), click URL pointing to web dashboard job detail ({base_url}/jobs/{id}), priority 3 (default), and tags ["briefcase"]. Wire into scheduler: after each scrape, for every newly created job, call Notify and update status to "notified". Write tests using httptest to verify the POST payload format
 
 ### 3B: Web Server & API Endpoints
 - [ ] Set up HTTP server in internal/web/server.go using chi: GET /api/jobs (query params: status, q for search, page/limit for pagination, returns JSON array), GET /api/jobs/{id} (returns JSON), POST /api/jobs/{id}/approve (updates status discovered/notified→approved, returns updated job JSON), POST /api/jobs/{id}/reject (updates status→rejected), GET /health (returns {"status":"ok"}). Add request logging middleware with slog. Wire into main.go (start HTTP server, graceful shutdown with context). Write handler tests using httptest.NewRecorder
