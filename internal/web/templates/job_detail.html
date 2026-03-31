@@ -1,0 +1,63 @@
+{{template "layout.html" .}}
+
+{{define "title"}}JobHuntr — {{.Job.Title}} at {{.Job.Company}}{{end}}
+
+{{define "content"}}
+<p><a href="/">← Back to Jobs</a></p>
+
+<h1>{{.Job.Title}}</h1>
+<p>
+  <strong>{{.Job.Company}}</strong>
+  {{if .Job.Location}}&nbsp;·&nbsp;{{.Job.Location}}{{end}}
+  {{if .Job.Salary}}&nbsp;·&nbsp;{{.Job.Salary}}{{end}}
+</p>
+
+{{if .Job.ApplyURL}}
+<p><a href="{{.Job.ApplyURL}}" target="_blank" rel="noopener noreferrer">Apply →</a></p>
+{{end}}
+
+<div id="status-section">
+  <span class="status-badge status-{{.Job.Status}}">{{.Job.Status}}</span>
+  {{if or (eq .Job.Status "discovered") (eq .Job.Status "notified")}}
+  &nbsp;
+  <button hx-post="/api/jobs/{{.Job.ID}}/approve"
+          hx-target="#status-section"
+          hx-swap="outerHTML"
+          class="outline contrast"
+          style="padding:0.3em 0.8em;">Approve</button>
+  <button hx-post="/api/jobs/{{.Job.ID}}/reject"
+          hx-target="#status-section"
+          hx-swap="outerHTML"
+          class="outline"
+          style="padding:0.3em 0.8em;">Reject</button>
+  {{end}}
+</div>
+
+{{if .Job.Description}}
+<h2>Description</h2>
+<pre style="white-space:pre-wrap;font-size:0.9em;background:#f9f9f9;padding:1rem;border-radius:0.3em;">{{.Job.Description}}</pre>
+{{end}}
+
+{{if eq .Job.Status "complete"}}
+<hr>
+<h2>Generated Resume</h2>
+<div style="border:1px solid #ccc;border-radius:0.3em;padding:1rem;margin-bottom:0.5rem;overflow:auto;">
+  {{.ResumeHTML}}
+</div>
+<p>
+  <a href="/output/{{.Job.ID}}/resume.pdf" download="resume.pdf" role="button" class="outline">
+    Download Resume PDF
+  </a>
+</p>
+
+<h2>Cover Letter</h2>
+<div style="border:1px solid #ccc;border-radius:0.3em;padding:1rem;margin-bottom:0.5rem;overflow:auto;">
+  {{.CoverHTML}}
+</div>
+<p>
+  <a href="/output/{{.Job.ID}}/cover_letter.pdf" download="cover_letter.pdf" role="button" class="outline">
+    Download Cover Letter PDF
+  </a>
+</p>
+{{end}}
+{{end}}

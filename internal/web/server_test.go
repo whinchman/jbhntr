@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 
@@ -287,6 +288,175 @@ func TestRejectJob(t *testing.T) {
 		resp, err := ts.Client().Post(ts.URL+"/api/jobs/999/reject", "application/json", nil)
 		if err != nil {
 			t.Fatalf("POST: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+// newCompleteJob creates a complete job whose PDF paths point to real temp files.
+// The caller is responsible for removing the files when done (via t.Cleanup).
+func newCompleteJob(t *testing.T, id int64) *models.Job {
+	t.Helper()
+	writeTemp := func(name, content string) string {
+		f, err := os.CreateTemp(t.TempDir(), name)
+		if err != nil {
+			t.Fatalf("create temp file: %v", err)
+		}
+		if _, err := f.WriteString(content); err != nil {
+			t.Fatalf("write temp file: %v", err)
+		}
+		f.Close()
+		return f.Name()
+	}
+	return &models.Job{
+		ID:         id,
+		Title:      "Staff Engineer",
+		Company:    "Globex",
+		Location:   "Remote",
+		Status:     models.StatusComplete,
+		ResumeHTML: "<p>Resume</p>",
+		CoverHTML:  "<p>Cover</p>",
+		ResumePDF:  writeTemp("resume*.pdf", "%PDF-resume"),
+		CoverPDF:   writeTemp("cover*.pdf", "%PDF-cover"),
+	}
+}
+
+func TestJobDetail(t *testing.T) {
+	t.Run("known job returns 200 HTML", func(t *testing.T) {
+		job := newTestJob(42, models.StatusDiscovered)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/jobs/42")
+		if err != nil {
+			t.Fatalf("GET /jobs/42: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if ct == "" || ct[:9] != "text/html" {
+			t.Errorf("Content-Type = %q, want text/html", ct)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/jobs/999")
+		if err != nil {
+			t.Fatalf("GET /jobs/999: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestDownloadResumePDF(t *testing.T) {
+	t.Run("complete job with PDF returns 200 and file data", func(t *testing.T) {
+		job := newCompleteJob(t, 7)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/7/resume.pdf")
+		if err != nil {
+			t.Fatalf("GET /output/7/resume.pdf: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		if cd := resp.Header.Get("Content-Disposition"); cd == "" {
+			t.Error("Content-Disposition header missing")
+		}
+	})
+
+	t.Run("job with empty ResumePDF returns 404", func(t *testing.T) {
+		job := newTestJob(8, models.StatusApproved) // no PDF paths
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/8/resume.pdf")
+		if err != nil {
+			t.Fatalf("GET /output/8/resume.pdf: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/resume.pdf")
+		if err != nil {
+			t.Fatalf("GET /output/999/resume.pdf: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestDownloadCoverPDF(t *testing.T) {
+	t.Run("complete job with PDF returns 200 and file data", func(t *testing.T) {
+		job := newCompleteJob(t, 9)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/9/cover_letter.pdf")
+		if err != nil {
+			t.Fatalf("GET /output/9/cover_letter.pdf: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		if cd := resp.Header.Get("Content-Disposition"); cd == "" {
+			t.Error("Content-Disposition header missing")
+		}
+	})
+
+	t.Run("job with empty CoverPDF returns 404", func(t *testing.T) {
+		job := newTestJob(10, models.StatusApproved)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/10/cover_letter.pdf")
+		if err != nil {
+			t.Fatalf("GET /output/10/cover_letter.pdf: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/cover_letter.pdf")
+		if err != nil {
+			t.Fatalf("GET /output/999/cover_letter.pdf: %v", err)
 		}
 		defer resp.Body.Close()
 
