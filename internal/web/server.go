@@ -68,6 +68,9 @@ type Server struct {
 	detailTmpl   *template.Template
 	settingsTmpl *template.Template
 
+	startTime    time.Time
+	lastScrapeFn func() time.Time // optional; returns last scrape time
+
 	mu         sync.Mutex // guards cfg, configPath, resumePath
 	cfg        *config.Config
 	configPath string
@@ -101,10 +104,18 @@ func NewServerWithConfig(st JobStore, cfg *config.Config, configPath, resumePath
 		templates:    tmpl,
 		detailTmpl:   detail,
 		settingsTmpl: settings,
+		startTime:    time.Now(),
 		cfg:          cfg,
 		configPath:   configPath,
 		resumePath:   resumePath,
 	}
+}
+
+// WithLastScrapeFn sets a function the server calls to obtain the last scrape
+// time for the /health endpoint. Call this after NewServerWithConfig.
+func (s *Server) WithLastScrapeFn(fn func() time.Time) *Server {
+	s.lastScrapeFn = fn
+	return s
 }
 
 // Handler builds and returns the chi router.
@@ -190,7 +201,16 @@ func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	resp := map[string]interface{}{
+		"status": "ok",
+		"uptime": time.Since(s.startTime).Round(time.Second).String(),
+	}
+	if s.lastScrapeFn != nil {
+		if t := s.lastScrapeFn(); !t.IsZero() {
+			resp["last_scrape"] = t.UTC().Format(time.RFC3339)
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {

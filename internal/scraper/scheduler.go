@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/whinchman/jobhuntr/internal/models"
@@ -26,6 +27,17 @@ type Scheduler struct {
 	filters  []models.SearchFilter
 	interval time.Duration
 	logger   *slog.Logger
+
+	mu           sync.Mutex
+	lastScrapeAt time.Time
+}
+
+// LastScrapeAt returns the time of the most recent completed scrape cycle, or
+// the zero value if no scrape has run yet.
+func (s *Scheduler) LastScrapeAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastScrapeAt
 }
 
 // NewScheduler constructs a Scheduler. If logger is nil, slog.Default() is used.
@@ -62,6 +74,10 @@ func (s *Scheduler) RunOnce(ctx context.Context) ([]models.Job, error) {
 		}
 		newJobs = append(newJobs, jobs...)
 	}
+
+	s.mu.Lock()
+	s.lastScrapeAt = time.Now()
+	s.mu.Unlock()
 
 	return newJobs, nil
 }

@@ -103,12 +103,15 @@ func TestHealth(t *testing.T) {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 
-	var body map[string]string
+	var body map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
 	if body["status"] != "ok" {
-		t.Errorf(`body["status"] = %q, want "ok"`, body["status"])
+		t.Errorf(`body["status"] = %v, want "ok"`, body["status"])
+	}
+	if _, ok := body["uptime"]; !ok {
+		t.Error(`body["uptime"] missing from health response`)
 	}
 }
 

@@ -150,6 +150,34 @@ func TestScheduler_RunOnce(t *testing.T) {
 	})
 }
 
+func TestScheduler_LastScrapeAt(t *testing.T) {
+	t.Run("zero before first run", func(t *testing.T) {
+		sched := NewScheduler(&mockSource{}, newMockStore(), nil, time.Hour, nil)
+		if !sched.LastScrapeAt().IsZero() {
+			t.Error("LastScrapeAt() should be zero before first RunOnce")
+		}
+	})
+
+	t.Run("non-zero after RunOnce", func(t *testing.T) {
+		src := &mockSource{results: [][]models.Job{{}}}
+		sched := NewScheduler(src, newMockStore(), []models.SearchFilter{{Keywords: "go"}}, time.Hour, nil)
+
+		before := time.Now()
+		if _, err := sched.RunOnce(context.Background()); err != nil {
+			t.Fatalf("RunOnce: %v", err)
+		}
+		after := time.Now()
+
+		got := sched.LastScrapeAt()
+		if got.IsZero() {
+			t.Error("LastScrapeAt() still zero after RunOnce")
+		}
+		if got.Before(before) || got.After(after) {
+			t.Errorf("LastScrapeAt() = %v, want between %v and %v", got, before, after)
+		}
+	})
+}
+
 func TestScheduler_Start(t *testing.T) {
 	t.Run("cancels cleanly without panic", func(t *testing.T) {
 		src := &mockSource{results: [][]models.Job{{}}}

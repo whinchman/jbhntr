@@ -5,12 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
-
-	"net/http"
 
 	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/generator"
@@ -70,26 +70,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go func() {
-		sig := make(chan os.Signal, 1)
-		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-		<-sig
-		slog.Info("shutdown signal received")
-		cancel()
-	}()
-
-	// Start HTTP server.
-	webSrv := web.NewServerWithConfig(db, cfg, *cfgPath, cfg.Resume.Path)
-	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler: webSrv.Handler(),
-	}
-	go func() {
-		slog.Info("http server listening", "addr", httpServer.Addr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("http server error", "error", err)
-		}
-	}()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start PDF converter and background worker.
 	pdfConverter, err := pdf.NewRodConverter()
@@ -101,20 +83,49 @@ func main() {
 
 	claudeGen := generator.NewAnthropicGenerator(cfg.Claude.APIKey, cfg.Claude.Model)
 	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, 30*time.Second, logger)
-	go worker.Start(ctx)
 
-	// Start background scheduler.
-	slog.Info("starting scheduler", "interval", interval, "filters", len(filters))
-	go sched.Start(ctx)
+	// Start HTTP server.
+	webSrv := web.NewServerWithConfig(db, cfg, *cfgPath, cfg.Resume.Path).
+		WithLastScrapeFn(sched.LastScrapeAt)
+	httpServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler: webSrv.Handler(),
+	}
+	go func() {
+		slog.Info("http server listening", "addr", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("http server error", "error", err)
+		}
+	}()
+
+	// Start background goroutines; WaitGroup lets shutdown wait for them.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		slog.Info("starting generator worker")
+		worker.Start(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		slog.Info("starting scheduler", "interval", interval, "filters", len(filters))
+		sched.Start(ctx)
+	}()
 
 	// Block until shutdown signal.
-	<-ctx.Done()
+	<-sig
+	slog.Info("shutdown signal received")
+	cancel()
 
-	// Gracefully stop HTTP server.
+	// Gracefully stop HTTP server (stop accepting new requests).
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutCancel()
 	if err := httpServer.Shutdown(shutCtx); err != nil {
 		slog.Error("http server shutdown error", "error", err)
 	}
+
+	// Wait for scheduler and worker to finish their current operation.
+	wg.Wait()
+
 	slog.Info("jobhuntr stopped")
 }
