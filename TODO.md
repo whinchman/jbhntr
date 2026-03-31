@@ -9,7 +9,7 @@ Completed work is moved to DONE.md after each feature merge.
 ## Phase 1: Foundation
 
 ### 1A: Project Skeleton
-- [ ] Initialize Go module (github.com/whinchman/jobhuntr), create project directory structure (cmd/jobhuntr/, internal/{config,models,store,scraper,notifier,generator,pdf,web}/), create config.yaml template with all sections (server, scraper, search_filters, ntfy, claude, resume, output), .gitignore (bin/, output/, worktrees/, *.db), and a main.go that loads config and prints "jobhuntr starting on :PORT"
+- [x] Initialize Go module (github.com/whinchman/jobhuntr), create project directory structure (cmd/jobhuntr/, internal/{config,models,store,scraper,notifier,generator,pdf,web}/), create config.yaml template with all sections (server, scraper, search_filters, ntfy, claude, resume, output), .gitignore (bin/, output/, worktrees/, *.db), and a main.go that loads config and prints "jobhuntr starting on :PORT"
 
 ### 1B: Config & Models
 - [ ] Implement config loading from config.yaml with env var substitution (replace ${VAR} with os.Getenv), define all data models in internal/models/: Job struct (all DB fields), JobStatus string type with constants (Discovered/Notified/Approved/Rejected/Generating/Complete/Failed) and a Valid() method, SearchFilter struct (Keywords/Location/MinSalary/MaxSalary/Title). Write tests for config parsing (including env var substitution) and model validation
