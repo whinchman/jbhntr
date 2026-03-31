@@ -50,7 +50,7 @@ Completed work is moved to DONE.md after each feature merge.
 - [x] Create job_detail.html template: shows full job description, company, location, salary, apply link (external), status badge, approve/reject buttons (hx-post to /api/jobs/{id}/approve|reject, hx-swap="outerHTML" to update status badge and hide buttons), and if status=complete: rendered resume HTML preview, cover letter HTML preview, download buttons for resume.pdf and cover_letter.pdf. Add routes: GET /jobs/{id} serves detail page, GET /output/{id}/resume.pdf and /output/{id}/cover_letter.pdf serve files with Content-Disposition: attachment headers. Use http.ServeFile
 
 ### 5C: Settings Page
-- [ ] Create settings.html template: display current search filters from config (keyword, location, salary range per filter), display base resume content (from resume.md), provide a form to add/remove search filters and edit resume content. POST /settings/filters updates config.yaml and reloads config in memory. POST /settings/resume writes to resume.md. Show a flash message on save. Keep it simple - direct file writes, no database for settings
+- [x] Create settings.html template: display current search filters from config (keyword, location, salary range per filter), display base resume content (from resume.md), provide a form to add/remove search filters and edit resume content. POST /settings/filters updates config.yaml and reloads config in memory. POST /settings/resume writes to resume.md. Show a flash message on save. Keep it simple - direct file writes, no database for settings
 
 ## Phase 6: Polish
 
