@@ -4,6 +4,11 @@ Features moved here after merge to the default branch.
 
 ## Phase 1: Foundation
 
+### 2A: Scraper Interface & SerpAPI (merged 2026-03-31)
+- Source interface (Search method)
+- SerpAPISource with 1 req/s rate limiter, full JSON mapping
+- 5 httptest-based tests
+
 ### 1C: SQLite Store (merged 2026-03-31)
 - internal/store: Open(WAL mode), auto-migrate jobs+scrape_runs schema
 - CreateJob (INSERT OR IGNORE dedup), GetJob, ListJobs, UpdateJobStatus, UpdateJobGenerated, CreateScrapeRun
