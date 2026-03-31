@@ -3,7 +3,9 @@ package web
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -15,6 +17,9 @@ import (
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/store"
 )
+
+//go:embed templates
+var templateFS embed.FS
 
 // slogRequestLogger is a chi middleware that logs each request with slog.
 func slogRequestLogger(next http.Handler) http.Handler {
@@ -38,14 +43,26 @@ type JobStore interface {
 	UpdateJobStatus(ctx context.Context, id int64, status models.JobStatus) error
 }
 
-// Server holds the HTTP dependencies.
-type Server struct {
-	store JobStore
+// allStatuses lists job statuses shown as tabs in the dashboard.
+var allStatuses = []models.JobStatus{
+	models.StatusDiscovered, models.StatusNotified, models.StatusApproved,
+	models.StatusGenerating, models.StatusComplete, models.StatusFailed, models.StatusRejected,
 }
 
-// NewServer constructs a Server.
+// Server holds the HTTP dependencies.
+type Server struct {
+	store     JobStore
+	templates *template.Template
+}
+
+// NewServer constructs a Server and parses embedded templates.
 func NewServer(st JobStore) *Server {
-	return &Server{store: st}
+	tmpl := template.Must(template.ParseFS(templateFS,
+		"templates/layout.html",
+		"templates/dashboard.html",
+		"templates/partials/job_rows.html",
+	))
+	return &Server{store: st, templates: tmpl}
 }
 
 // Handler builds and returns the chi router.
@@ -54,6 +71,8 @@ func (s *Server) Handler() http.Handler {
 	r.Use(slogRequestLogger)
 	r.Use(chimw.Recoverer)
 
+	r.Get("/", s.handleDashboard)
+	r.Get("/partials/job-table", s.handleJobTablePartial)
 	r.Get("/health", s.handleHealth)
 
 	r.Route("/api/jobs", func(r chi.Router) {
@@ -64,6 +83,59 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	return r
+}
+
+type dashboardData struct {
+	Jobs         []models.Job
+	Statuses     []models.JobStatus
+	ActiveStatus string
+	Search       string
+}
+
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := store.ListJobsFilter{
+		Status: models.JobStatus(q.Get("status")),
+		Search: q.Get("q"),
+	}
+	jobs, err := s.store.ListJobs(r.Context(), f)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list jobs")
+		return
+	}
+	if jobs == nil {
+		jobs = []models.Job{}
+	}
+	data := dashboardData{
+		Jobs:         jobs,
+		Statuses:     allStatuses,
+		ActiveStatus: string(f.Status),
+		Search:       f.Search,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.templates.ExecuteTemplate(w, "layout.html", data); err != nil {
+		slog.Error("template render error", "error", err)
+	}
+}
+
+func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := store.ListJobsFilter{
+		Status: models.JobStatus(q.Get("status")),
+		Search: q.Get("q"),
+	}
+	jobs, err := s.store.ListJobs(r.Context(), f)
+	if err != nil {
+		http.Error(w, "failed to list jobs", http.StatusInternalServerError)
+		return
+	}
+	if jobs == nil {
+		jobs = []models.Job{}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.templates.ExecuteTemplate(w, "job_rows", jobs); err != nil {
+		slog.Error("template render error", "error", err)
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

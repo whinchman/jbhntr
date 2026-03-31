@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{block "title" .}}JobHuntr{{end}}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <style>
+    .status-badge {
+      display: inline-block;
+      padding: 0.15em 0.5em;
+      border-radius: 0.3em;
+      font-size: 0.8em;
+      font-weight: bold;
+    }
+    .status-discovered  { background:#e3f2fd; color:#1565c0; }
+    .status-notified    { background:#f3e5f5; color:#6a1b9a; }
+    .status-approved    { background:#e8f5e9; color:#2e7d32; }
+    .status-rejected    { background:#ffebee; color:#b71c1c; }
+    .status-generating  { background:#fff8e1; color:#f57f17; }
+    .status-complete    { background:#e0f2f1; color:#004d40; }
+    .status-failed      { background:#fce4ec; color:#880e4f; }
+    nav { margin-bottom: 1.5rem; }
+    .tab-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .tab-bar a { text-decoration: none; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <nav>
+      <strong><a href="/">JobHuntr</a></strong>
+      &nbsp;·&nbsp;
+      <a href="/">Jobs</a>
+      &nbsp;·&nbsp;
+      <a href="/settings">Settings</a>
+    </nav>
+    {{block "content" .}}{{end}}
+  </main>
+</body>
+</html>

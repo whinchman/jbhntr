@@ -1,0 +1,56 @@
+{{template "layout.html" .}}
+
+{{define "title"}}JobHuntr — Dashboard{{end}}
+
+{{define "content"}}
+<h1>Job Listings</h1>
+
+<div class="tab-bar">
+  {{range $status := .Statuses}}
+  <a href="?status={{$status}}" role="button"
+     class="{{if eq $status $.ActiveStatus}}contrast{{else}}outline{{end}}"
+     hx-get="/partials/job-table?status={{$status}}"
+     hx-target="#job-table-body"
+     hx-swap="innerHTML">
+    {{$status}}
+  </a>
+  {{end}}
+  <a href="/" role="button"
+     class="{{if eq $.ActiveStatus ""}}contrast{{else}}outline{{end}}"
+     hx-get="/partials/job-table"
+     hx-target="#job-table-body"
+     hx-swap="innerHTML">
+    all
+  </a>
+</div>
+
+<input type="search" name="q" placeholder="Search jobs…"
+       hx-get="/partials/job-table"
+       hx-trigger="keyup changed delay:300ms"
+       hx-target="#job-table-body"
+       hx-swap="innerHTML"
+       hx-include="[name='q']"
+       value="{{.Search}}">
+
+<div hx-get="/partials/job-table?status={{.ActiveStatus}}&q={{.Search}}"
+     hx-trigger="every 30s"
+     hx-target="#job-table-body"
+     hx-swap="innerHTML">
+  <table>
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Company</th>
+        <th>Location</th>
+        <th>Salary</th>
+        <th>Status</th>
+        <th>Date</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="job-table-body">
+      {{template "job_rows" .Jobs}}
+    </tbody>
+  </table>
+</div>
+{{end}}
