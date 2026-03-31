@@ -55,7 +55,7 @@ Completed work is moved to DONE.md after each feature merge.
 ## Phase 6: Polish
 
 ### 6A: Graceful Shutdown & Logging
-- [ ] Add graceful shutdown to main.go: listen for SIGINT/SIGTERM, cancel root context, wait for scheduler loop to finish current scrape, wait for generator worker to finish current job, shut down HTTP server with timeout, close database, log clean exit. Ensure slog is used consistently across all packages with structured fields (job_id, source, status, duration, etc). Add GET /health endpoint returning uptime and last scrape time
+- [x] Add graceful shutdown to main.go: listen for SIGINT/SIGTERM, cancel root context, wait for scheduler loop to finish current scrape, wait for generator worker to finish current job, shut down HTTP server with timeout, close database, log clean exit. Ensure slog is used consistently across all packages with structured fields (job_id, source, status, duration, etc). Add GET /health endpoint returning uptime and last scrape time
 
 ### 6B: Systemd & Docs
 - [ ] Create deploy/jobhuntr.service systemd unit file (Type=simple, restart on failure, EnvironmentFile for secrets), create .env.example with all required env vars (ANTHROPIC_API_KEY, SERPAPI_KEY, NTFY_TOPIC), create README.md documenting: what jobhuntr does, prerequisites (Go 1.24, Chromium), installation, configuration (config.yaml fields), running (direct and systemd), ntfy setup, usage workflow
