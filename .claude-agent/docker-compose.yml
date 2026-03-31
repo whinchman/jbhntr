@@ -7,13 +7,13 @@ services:
         USER_UID: "${UID:-1000}"
         USER_GID: "${GID:-1000}"
     volumes:
-      - .:/workspace
+      - ..:/workspace
       - ${HOME}/.claude:/home/agent/.claude
       - ${HOME}/.claude.json:/home/agent/.claude.json
+    env_file:
+      - ../.env
     environment:
       - DISPLAY=:99
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - SERPAPI_KEY=${SERPAPI_KEY}
     working_dir: /workspace
     stdin_open: true
     tty: true

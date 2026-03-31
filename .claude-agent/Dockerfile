@@ -9,7 +9,7 @@ USER root
 SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Core system packages + Chromium for go-rod PDF generation
+# Core system packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
@@ -29,7 +29,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libxi6 \
     build-essential \
-    chromium-browser \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Chromium via playwright's known-good build (avoids snap shim in Noble)
+# go-rod will auto-download its own browser binary at first use, but we
+# pre-install Google Chrome stable as a reliable fallback.
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    google-chrome-stable \
     fonts-liberation \
     libnss3 \
     libatk-bridge2.0-0 \
@@ -37,7 +46,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcomposite1 \
     libxdamage1 \
     libxfixes3 \
-    libxrandr2 \
     libgbm1 \
     libasound2t64 \
     libpango-1.0-0 \
