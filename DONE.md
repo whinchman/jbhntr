@@ -4,6 +4,10 @@ Features moved here after merge to the default branch.
 
 ## Phase 1: Foundation
 
+### 1B: Config & Models (merged 2026-03-31)
+- internal/models: Job struct (all DB fields + timestamps), JobStatus constants + Valid(), SearchFilter
+- table-driven tests for all 7 status constants and invalid inputs
+
 ### 1A: Project Skeleton (merged 2026-03-31)
 - Go module initialized: github.com/whinchman/jobhuntr
 - Full directory structure: cmd/jobhuntr/, internal/{config,models,store,scraper,notifier,generator,pdf,web}/
