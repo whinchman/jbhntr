@@ -2,6 +2,14 @@
 
 Features moved here after merge to the default branch.
 
+## Phase 3: Notifications & Web API
+
+### 3B: Web Server & API Endpoints (merged 2026-03-31)
+- chi router with slog request logger + recovery middleware
+- GET /health, GET /api/jobs, GET /api/jobs/{id}, POST /approve, POST /reject
+- Graceful HTTP shutdown wired into main.go
+- 10 tests with mock JobStore
+
 ## Phase 1: Foundation
 
 ### 2A: Scraper Interface & SerpAPI (merged 2026-03-31)
