@@ -2,6 +2,14 @@
 
 Features moved here after merge to the default branch.
 
+## Phase 4: Resume Generation
+
+### 4B: PDF Worker (merged 2026-03-31)
+- RodConverter: go-rod A4 PDF generation with 1.5cm margins
+- Worker: 30s poll loop, approved→generating→complete/failed state transitions
+- WorkerStore interface for testability
+- 5 worker tests with mocks
+
 ## Phase 3: Notifications & Web API
 
 ### 3B: Web Server & API Endpoints (merged 2026-03-31)
