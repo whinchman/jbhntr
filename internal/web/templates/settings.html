@@ -1,0 +1,80 @@
+{{template "layout.html" .}}
+
+{{define "title"}}JobHuntr — Settings{{end}}
+
+{{define "content"}}
+<h1>Settings</h1>
+
+{{if .Saved}}
+<div role="alert" style="background:#e8f5e9;color:#2e7d32;padding:0.75rem 1rem;border-radius:0.3em;margin-bottom:1rem;">
+  Settings saved.
+</div>
+{{end}}
+
+<section>
+  <h2>Search Filters</h2>
+
+  {{if .Filters}}
+  <table>
+    <thead>
+      <tr>
+        <th>Keywords</th>
+        <th>Location</th>
+        <th>Min Salary</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $i, $f := .Filters}}
+      <tr>
+        <td>{{$f.Keywords}}</td>
+        <td>{{if $f.Location}}{{$f.Location}}{{else}}—{{end}}</td>
+        <td>{{if $f.MinSalary}}${{$f.MinSalary}}{{else}}—{{end}}</td>
+        <td>
+          <button hx-post="/settings/filters/remove?index={{$i}}"
+                  hx-target="body"
+                  hx-push-url="true"
+                  class="outline secondary"
+                  style="padding:0.2em 0.6em;font-size:0.8em;">Remove</button>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p style="color:#999;">No search filters configured.</p>
+  {{end}}
+
+  <h3>Add Filter</h3>
+  <form method="POST" action="/settings/filters">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;align-items:end;">
+      <label>
+        Keywords
+        <input type="text" name="keywords" placeholder="e.g. senior golang engineer" required>
+      </label>
+      <label>
+        Location
+        <input type="text" name="location" placeholder="e.g. Remote">
+      </label>
+      <label>
+        Min Salary
+        <input type="number" name="min_salary" placeholder="e.g. 150000" min="0">
+      </label>
+      <button type="submit">Add</button>
+    </div>
+  </form>
+</section>
+
+<hr>
+
+<section>
+  <h2>Base Resume</h2>
+  <form method="POST" action="/settings/resume">
+    <label>
+      Resume content (Markdown)
+      <textarea name="resume" rows="20" style="font-family:monospace;font-size:0.9em;">{{.Resume}}</textarea>
+    </label>
+    <button type="submit">Save Resume</button>
+  </form>
+</section>
+{{end}}

@@ -8,12 +8,17 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"gopkg.in/yaml.v3"
+
+	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/store"
 )
@@ -58,13 +63,26 @@ var allStatuses = []models.JobStatus{
 
 // Server holds the HTTP dependencies.
 type Server struct {
-	store      JobStore
-	templates  *template.Template
-	detailTmpl *template.Template
+	store        JobStore
+	templates    *template.Template
+	detailTmpl   *template.Template
+	settingsTmpl *template.Template
+
+	mu         sync.Mutex // guards cfg, configPath, resumePath
+	cfg        *config.Config
+	configPath string
+	resumePath string
 }
 
 // NewServer constructs a Server and parses embedded templates.
+// cfg, configPath and resumePath may be zero/nil when settings are not needed.
 func NewServer(st JobStore) *Server {
+	return NewServerWithConfig(st, nil, "", "")
+}
+
+// NewServerWithConfig constructs a Server with config and file paths for the
+// settings page. Pass nil cfg or empty paths to disable settings persistence.
+func NewServerWithConfig(st JobStore, cfg *config.Config, configPath, resumePath string) *Server {
 	tmpl := template.Must(template.ParseFS(templateFS,
 		"templates/layout.html",
 		"templates/dashboard.html",
@@ -74,7 +92,19 @@ func NewServer(st JobStore) *Server {
 		"templates/layout.html",
 		"templates/job_detail.html",
 	))
-	return &Server{store: st, templates: tmpl, detailTmpl: detail}
+	settings := template.Must(template.ParseFS(templateFS,
+		"templates/layout.html",
+		"templates/settings.html",
+	))
+	return &Server{
+		store:        st,
+		templates:    tmpl,
+		detailTmpl:   detail,
+		settingsTmpl: settings,
+		cfg:          cfg,
+		configPath:   configPath,
+		resumePath:   resumePath,
+	}
 }
 
 // Handler builds and returns the chi router.
@@ -90,6 +120,11 @@ func (s *Server) Handler() http.Handler {
 	r.Get("/jobs/{id}", s.handleJobDetail)
 	r.Get("/output/{id}/resume.pdf", s.handleDownloadResume)
 	r.Get("/output/{id}/cover_letter.pdf", s.handleDownloadCover)
+
+	r.Get("/settings", s.handleSettings)
+	r.Post("/settings/resume", s.handleSaveResume)
+	r.Post("/settings/filters", s.handleAddFilter)
+	r.Post("/settings/filters/remove", s.handleRemoveFilter)
 
 	r.Route("/api/jobs", func(r chi.Router) {
 		r.Get("/", s.handleListJobs)
@@ -262,6 +297,139 @@ func (s *Server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 	job.Status = models.StatusRejected
 	writeJSON(w, http.StatusOK, job)
 }
+
+// ─── settings handlers ────────────────────────────────────────────────────────
+
+type settingsData struct {
+	Filters []config.SearchFilter
+	Resume  string
+	Saved   bool
+}
+
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	filters := s.filtersSnapshot()
+	s.mu.Unlock()
+
+	resume := ""
+	if s.resumePath != "" {
+		if b, err := os.ReadFile(s.resumePath); err == nil {
+			resume = string(b)
+		}
+	}
+
+	data := settingsData{
+		Filters: filters,
+		Resume:  resume,
+		Saved:   r.URL.Query().Get("saved") == "1",
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.settingsTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+		slog.Error("settings template render error", "error", err)
+	}
+}
+
+func (s *Server) handleSaveResume(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	content := r.FormValue("resume")
+
+	if s.resumePath == "" {
+		http.Error(w, "resume path not configured", http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(s.resumePath, []byte(content), 0o644); err != nil {
+		slog.Error("failed to write resume", "error", err)
+		http.Error(w, "failed to save resume", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+}
+
+func (s *Server) handleAddFilter(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	minSalary := 0
+	if raw := r.FormValue("min_salary"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			minSalary = n
+		}
+	}
+	f := config.SearchFilter{
+		Keywords:  r.FormValue("keywords"),
+		Location:  r.FormValue("location"),
+		MinSalary: minSalary,
+	}
+
+	s.mu.Lock()
+	if s.cfg != nil {
+		s.cfg.SearchFilters = append(s.cfg.SearchFilters, f)
+	}
+	err := s.writeConfig()
+	s.mu.Unlock()
+
+	if err != nil {
+		slog.Error("failed to write config", "error", err)
+		http.Error(w, "failed to save filter", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+}
+
+func (s *Server) handleRemoveFilter(w http.ResponseWriter, r *http.Request) {
+	idx, err := strconv.Atoi(r.URL.Query().Get("index"))
+	if err != nil {
+		http.Error(w, "invalid index", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	if s.cfg == nil || idx < 0 || idx >= len(s.cfg.SearchFilters) {
+		s.mu.Unlock()
+		http.Error(w, "index out of range", http.StatusBadRequest)
+		return
+	}
+	s.cfg.SearchFilters = append(s.cfg.SearchFilters[:idx], s.cfg.SearchFilters[idx+1:]...)
+	writeErr := s.writeConfig()
+	s.mu.Unlock()
+
+	if writeErr != nil {
+		slog.Error("failed to write config", "error", writeErr)
+		http.Error(w, "failed to save config", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+}
+
+// filtersSnapshot returns a copy of the current search filters. Caller must
+// hold s.mu.
+func (s *Server) filtersSnapshot() []config.SearchFilter {
+	if s.cfg == nil {
+		return nil
+	}
+	out := make([]config.SearchFilter, len(s.cfg.SearchFilters))
+	copy(out, s.cfg.SearchFilters)
+	return out
+}
+
+// writeConfig marshals s.cfg to YAML and writes it to s.configPath.
+// Caller must hold s.mu.
+func (s *Server) writeConfig() error {
+	if s.cfg == nil || s.configPath == "" {
+		return nil
+	}
+	data, err := yaml.Marshal(s.cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.configPath, data, 0o644)
+}
+
+// ─── detail / download handlers ───────────────────────────────────────────────
 
 func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)

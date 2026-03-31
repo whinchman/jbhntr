@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/store"
 	"github.com/whinchman/jobhuntr/internal/web"
@@ -462,6 +465,184 @@ func TestDownloadCoverPDF(t *testing.T) {
 
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+// ─── settings helpers ─────────────────────────────────────────────────────────
+
+// minimalConfigYAML is a complete but minimal config used in settings tests.
+const minimalConfigYAML = `server:
+  port: 8080
+  base_url: "http://localhost:8080"
+scraper:
+  interval: "1h"
+  serpapi_key: "test-key"
+search_filters:
+  - keywords: "golang engineer"
+    location: "Remote"
+    min_salary: 100000
+ntfy:
+  topic: "test"
+  server: "https://ntfy.sh"
+claude:
+  api_key: "test-claude"
+  model: "claude-sonnet-4-20250514"
+resume:
+  path: "./resume.md"
+output:
+  dir: "./output"
+`
+
+// newSettingsServer creates a test server wired with config + file paths.
+// It returns the test server, the config file path, and the resume file path.
+func newSettingsServer(t *testing.T) (*httptest.Server, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+
+	cfgPath := dir + "/config.yaml"
+	if err := os.WriteFile(cfgPath, []byte(minimalConfigYAML), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	resumePath := dir + "/resume.md"
+	if err := os.WriteFile(resumePath, []byte("# My Resume\n"), 0o644); err != nil {
+		t.Fatalf("write resume: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	ms := newMockJobStore()
+	srv := web.NewServerWithConfig(ms, cfg, cfgPath, resumePath)
+	ts := httptest.NewServer(srv.Handler())
+	return ts, cfgPath, resumePath
+}
+
+// ─── settings tests ──────────────────────────────────────────────────────────
+
+func TestSettingsPage(t *testing.T) {
+	t.Run("GET /settings returns 200 HTML", func(t *testing.T) {
+		ts, _, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/settings")
+		if err != nil {
+			t.Fatalf("GET /settings: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.HasPrefix(ct, "text/html") {
+			t.Errorf("Content-Type = %q, want text/html", ct)
+		}
+	})
+}
+
+func TestSaveResume(t *testing.T) {
+	t.Run("POST /settings/resume writes file and redirects", func(t *testing.T) {
+		ts, _, resumePath := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"resume": {"# Updated Resume\n\nNew content."}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/resume", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/resume: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Should redirect (302) to /settings?saved=1
+		if resp.StatusCode != http.StatusOK && resp.StatusCode/100 != 3 {
+			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
+		}
+
+		got, err := os.ReadFile(resumePath)
+		if err != nil {
+			t.Fatalf("read resume: %v", err)
+		}
+		if string(got) != "# Updated Resume\n\nNew content." {
+			t.Errorf("resume content = %q, want updated content", string(got))
+		}
+	})
+}
+
+func TestAddFilter(t *testing.T) {
+	t.Run("POST /settings/filters adds filter and rewrites config", func(t *testing.T) {
+		ts, cfgPath, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{
+			"keywords":   {"senior go engineer"},
+			"location":   {"New York"},
+			"min_salary": {"120000"},
+		}
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/filters: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode/100 != 3 {
+			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
+		}
+
+		updated, err := config.Load(cfgPath)
+		if err != nil {
+			t.Fatalf("reload config: %v", err)
+		}
+		if len(updated.SearchFilters) != 2 {
+			t.Errorf("len(search_filters) = %d, want 2", len(updated.SearchFilters))
+		}
+		last := updated.SearchFilters[len(updated.SearchFilters)-1]
+		if last.Keywords != "senior go engineer" {
+			t.Errorf("last.Keywords = %q, want senior go engineer", last.Keywords)
+		}
+		if last.MinSalary != 120000 {
+			t.Errorf("last.MinSalary = %d, want 120000", last.MinSalary)
+		}
+	})
+}
+
+func TestRemoveFilter(t *testing.T) {
+	t.Run("POST /settings/filters/remove?index=0 removes filter", func(t *testing.T) {
+		ts, cfgPath, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?index=0", "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatalf("POST /settings/filters/remove: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode/100 != 3 {
+			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
+		}
+
+		updated, err := config.Load(cfgPath)
+		if err != nil {
+			t.Fatalf("reload config: %v", err)
+		}
+		if len(updated.SearchFilters) != 0 {
+			t.Errorf("len(search_filters) = %d, want 0", len(updated.SearchFilters))
+		}
+	})
+
+	t.Run("POST /settings/filters/remove with out-of-range index returns 400", func(t *testing.T) {
+		ts, _, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?index=99", "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
 		}
 	})
 }

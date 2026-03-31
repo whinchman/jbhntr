@@ -79,7 +79,7 @@ func main() {
 	}()
 
 	// Start HTTP server.
-	webSrv := web.NewServer(db)
+	webSrv := web.NewServerWithConfig(db, cfg, *cfgPath, cfg.Resume.Path)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: webSrv.Handler(),
