@@ -8,7 +8,7 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
-## BUG-001: Legacy UNIQUE(external_id, source) prevents per-user job dedup
+## ~~BUG-001: Legacy UNIQUE(external_id, source) prevents per-user job dedup~~ FIXED
 
 **Severity:** Medium
 **File:** `internal/store/migrations/003_add_user_id_to_jobs.sql`, `internal/store/store.go` (baseline schema)
@@ -45,7 +45,7 @@ A new migration must rebuild the `jobs` table without the old two-column
 create-new / copy / drop-old / rename approach. This is a data migration
 that should be done carefully with tests.
 
-## BUG-002: Settings handlers panic if filterStore is nil
+## ~~BUG-002: Settings handlers panic if filterStore is nil~~ FIXED
 
 **Severity:** Low
 **File:** `internal/web/server.go` (lines 515-618)
@@ -77,7 +77,7 @@ if s.filterStore == nil {
 
 Or register settings routes conditionally (only when `filterStore != nil`).
 
-## BUG-003: Migration 004 PRAGMA foreign_keys is no-op inside transaction
+## ~~BUG-003: Migration 004 PRAGMA foreign_keys is no-op inside transaction~~ FIXED
 
 **Severity:** Low
 **File:** `internal/store/migrations/004_rebuild_jobs_unique_constraint.sql`, `internal/store/migrate.go`
@@ -108,7 +108,7 @@ None currently. The migration works correctly because no FKs reference `jobs`.
 2. Or update `migrate.go:runMigration` to detect and execute PRAGMAs outside
    the transaction boundary before beginning the migration transaction.
 
-## BUG-004: runFilter exceeds 50-line function guideline
+## ~~BUG-004: runFilter exceeds 50-line function guideline~~ FIXED
 
 **Severity:** Low (code standard)
 **File:** `internal/scraper/scheduler.go` (lines 130-210)
