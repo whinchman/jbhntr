@@ -1,7 +1,7 @@
 # Task: task4-multiuser-scraper
 
 **Type:** coder
-**Status:** done
+**Status:** done (verified)
 **Priority:** 2
 **Epic:** oauth-multi-user
 **Depends On:** task1-schema-migration
@@ -148,3 +148,50 @@ No remaining `TODO(task3)` or `TODO(task4)` comments.
 
 - **BUG-003**: Migration 004 PRAGMAs are no-ops inside transaction (low, harmless)
 - **BUG-004**: `runFilter` exceeds 50-line guideline (low, pre-existing)
+
+## QA
+
+**QA Agent:** Claude Opus 4.6
+**Verdict:** Verified -- all acceptance criteria met
+**Date:** 2026-04-01
+
+### Verification Results
+
+| Check | Result |
+|-------|--------|
+| `go build ./...` | PASS |
+| `go test -count=1 ./...` | PASS (all 8 packages) |
+| No `TODO(task4)` comments | PASS (none found) |
+| No `TODO(task3)` comments | PASS (none found) |
+| Scheduler queries per-user filters from DB | PASS (verified via `UserFilterReader` interface and tests) |
+| Scheduler creates jobs with correct `user_id` | PASS (verified in `userID is passed correctly to CreateJob` test) |
+| Per-user dedup works | PASS (same external job inserted for different users) |
+| BUG-001 fixed | PASS (two users with same external_id+source both insert successfully) |
+| Worker correctly processes jobs across all users | PASS (uses `userID=0` unscoped query, clearly commented) |
+
+### Adversarial Tests Added (commit f8e9e81)
+
+**Store tests** (`internal/store/qa_task4_test.go`):
+- `TestQA_UserWithFiltersButNoJobs` -- user with filters but zero jobs in DB
+- `TestQA_ListActiveUserIDs_NoUsersWithFilters` -- 3 users, none with filters
+- `TestQA_SameJobThreeUsers` -- same external job for 3 different users (BUG-001 core test)
+- `TestQA_DeletedUserFiltersStillExist` -- FK constraint blocks user delete when filters exist
+- `TestQA_Migration004_DataSurvival` -- jobs survive close/reopen cycle, per-user dedup works after
+- `TestQA_BUG001_TwoUsersSameJob` -- explicit BUG-001 reproduction/verification
+- `TestQA_PerUserDedupConsistency` -- dedup index correctly handles (user_id, external_id, source) tuples
+
+**Scheduler tests** (`internal/scraper/qa_task4_test.go`):
+- `TestQA_Scheduler_UserWithFiltersNoJobs` -- source returns empty for all filters
+- `TestQA_Scheduler_EmptyActiveUsers` -- no active users, scheduler does nothing
+- `TestQA_Scheduler_SameJobThreeUsers` -- 3 users discover same job, all 3 created
+- `TestQA_Scheduler_DeletedUserWithFilters` -- scheduler handles orphaned user_id gracefully
+- `TestQA_Scheduler_MultipleUsersPartialFailure` -- filter error + source error + success across 3 users
+- `TestQA_Scheduler_UserFilterToSearchFilter` -- field mapping completeness
+
+### Findings
+
+1. **FK behavior confirmed:** `user_search_filters.user_id REFERENCES users(id)` correctly blocks user deletion when filters exist (no CASCADE defined). This means orphaned filters cannot occur through normal SQL operations.
+
+2. **No new bugs found.** All previously filed bugs (BUG-003, BUG-004) are confirmed low-severity and pre-existing or harmless as documented.
+
+3. **Migration 004 data survival:** Verified that jobs with various statuses and field values survive a close/reopen cycle (which re-runs Open -> schema + Migrate). Per-user dedup works correctly after reopen.
