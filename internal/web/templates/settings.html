@@ -25,7 +25,7 @@
       </tr>
     </thead>
     <tbody>
-      {{range $i, $f := .Filters}}
+      {{range $f := .Filters}}
       <tr>
         <td>{{$f.Keywords}}</td>
         <td>{{if $f.Location}}{{$f.Location}}{{else}}—{{end}}</td>
