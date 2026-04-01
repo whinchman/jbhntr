@@ -8,6 +8,28 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-008: CSRF token missing from settings.html plain-HTML forms
+
+**Severity:** High (blocks core functionality)
+**File:** `internal/web/templates/settings.html` (lines 49, 72)
+**Found by:** User
+
+### Description
+
+The "Add Filter" form (`POST /settings/filters`) and "Save Resume" form (`POST /settings/resume`) are plain HTML `<form>` elements with no CSRF hidden field. The `hx-headers` CSRF injection in `layout.html` only applies to HTMX requests — it does not inject into standard form submissions. gorilla/csrf rejects both POSTs with "Forbidden - CSRF token not found in request".
+
+### Reproduction
+
+1. Log in and navigate to `/settings`
+2. Fill in the Add Filter form and submit — `403 Forbidden`
+3. Edit the resume and submit — `403 Forbidden`
+
+### Fix
+
+Add `<input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">` inside both `<form>` elements. The `CSRFToken` field is already populated in the settings template data struct.
+
+---
+
 ## ~~BUG-001: Legacy UNIQUE(external_id, source) prevents per-user job dedup~~ FIXED
 
 **Severity:** Medium

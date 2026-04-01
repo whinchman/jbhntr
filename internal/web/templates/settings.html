@@ -47,6 +47,7 @@
 
   <h3>Add Filter</h3>
   <form method="POST" action="/settings/filters">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;align-items:end;">
       <label>
         Keywords
@@ -70,6 +71,7 @@
 <section>
   <h2>Base Resume</h2>
   <form method="POST" action="/settings/resume">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
     <label>
       Resume content (Markdown)
       <textarea name="resume" rows="20" style="font-family:monospace;font-size:0.9em;">{{.Resume}}</textarea>
