@@ -41,7 +41,7 @@ func TestCreateJob(t *testing.T) {
 		s := openTestStore(t)
 		job := sampleJob("ext-1", "serpapi")
 
-		inserted, err := s.CreateJob(ctx, job)
+		inserted, err := s.CreateJob(ctx, 0, job)
 		if err != nil {
 			t.Fatalf("CreateJob error = %v", err)
 		}
@@ -58,8 +58,8 @@ func TestCreateJob(t *testing.T) {
 		job1 := sampleJob("ext-dup", "serpapi")
 		job2 := sampleJob("ext-dup", "serpapi")
 
-		inserted1, _ := s.CreateJob(ctx, job1)
-		inserted2, err := s.CreateJob(ctx, job2)
+		inserted1, _ := s.CreateJob(ctx, 0, job1)
+		inserted2, err := s.CreateJob(ctx, 0, job2)
 
 		if err != nil {
 			t.Fatalf("CreateJob (dup) error = %v", err)
@@ -77,8 +77,8 @@ func TestCreateJob(t *testing.T) {
 		j1 := sampleJob("ext-x", "serpapi")
 		j2 := sampleJob("ext-x", "linkedin")
 
-		i1, _ := s.CreateJob(ctx, j1)
-		i2, err := s.CreateJob(ctx, j2)
+		i1, _ := s.CreateJob(ctx, 0, j1)
+		i2, err := s.CreateJob(ctx, 0, j2)
 
 		if err != nil {
 			t.Fatalf("CreateJob error = %v", err)
@@ -97,9 +97,9 @@ func TestGetJob(t *testing.T) {
 	t.Run("returns inserted job", func(t *testing.T) {
 		s := openTestStore(t)
 		job := sampleJob("ext-get", "serpapi")
-		s.CreateJob(ctx, job)
+		s.CreateJob(ctx, 0, job)
 
-		got, err := s.GetJob(ctx, job.ID)
+		got, err := s.GetJob(ctx, 0, job.ID)
 		if err != nil {
 			t.Fatalf("GetJob error = %v", err)
 		}
@@ -116,7 +116,7 @@ func TestGetJob(t *testing.T) {
 
 	t.Run("returns error for unknown id", func(t *testing.T) {
 		s := openTestStore(t)
-		_, err := s.GetJob(ctx, 99999)
+		_, err := s.GetJob(ctx, 0, 99999)
 		if err == nil {
 			t.Error("GetJob(nonexistent) expected error, got nil")
 		}
@@ -136,14 +136,14 @@ func TestListJobs(t *testing.T) {
 			{ExternalID: "c", Source: "serpapi", Title: "Staff Engineer", Company: "Acme", Location: "Remote", Status: models.StatusApproved},
 		}
 		for _, j := range jobs {
-			s.CreateJob(ctx, j)
+			s.CreateJob(ctx, 0, j)
 		}
 		return s
 	}
 
 	t.Run("filter by status", func(t *testing.T) {
 		s := setup(t)
-		results, err := s.ListJobs(ctx, ListJobsFilter{Status: models.StatusDiscovered})
+		results, err := s.ListJobs(ctx, 0, ListJobsFilter{Status: models.StatusDiscovered})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -157,7 +157,7 @@ func TestListJobs(t *testing.T) {
 
 	t.Run("no filter returns all", func(t *testing.T) {
 		s := setup(t)
-		results, err := s.ListJobs(ctx, ListJobsFilter{})
+		results, err := s.ListJobs(ctx, 0, ListJobsFilter{})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -168,7 +168,7 @@ func TestListJobs(t *testing.T) {
 
 	t.Run("text search on title", func(t *testing.T) {
 		s := setup(t)
-		results, err := s.ListJobs(ctx, ListJobsFilter{Search: "Staff"})
+		results, err := s.ListJobs(ctx, 0, ListJobsFilter{Search: "Staff"})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -179,7 +179,7 @@ func TestListJobs(t *testing.T) {
 
 	t.Run("pagination limit", func(t *testing.T) {
 		s := setup(t)
-		results, err := s.ListJobs(ctx, ListJobsFilter{Limit: 2})
+		results, err := s.ListJobs(ctx, 0, ListJobsFilter{Limit: 2})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -190,8 +190,8 @@ func TestListJobs(t *testing.T) {
 
 	t.Run("pagination offset", func(t *testing.T) {
 		s := setup(t)
-		all, _ := s.ListJobs(ctx, ListJobsFilter{})
-		page2, err := s.ListJobs(ctx, ListJobsFilter{Limit: 2, Offset: 2})
+		all, _ := s.ListJobs(ctx, 0, ListJobsFilter{})
+		page2, err := s.ListJobs(ctx, 0, ListJobsFilter{Limit: 2, Offset: 2})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -236,9 +236,9 @@ func TestUpdateJobStatus(t *testing.T) {
 				ExternalID: "trans-test", Source: "serpapi",
 				Title: "T", Company: "C", Location: "L", Status: tc.from,
 			}
-			s.CreateJob(ctx, job)
+			s.CreateJob(ctx, 0, job)
 
-			err := s.UpdateJobStatus(ctx, job.ID, tc.to)
+			err := s.UpdateJobStatus(ctx, 0, job.ID, tc.to)
 			if tc.ok && err != nil {
 				t.Errorf("UpdateJobStatus(%s→%s) unexpected error: %v", tc.from, tc.to, err)
 			}
@@ -257,14 +257,14 @@ func TestUpdateJobGenerated(t *testing.T) {
 	t.Run("sets generated fields", func(t *testing.T) {
 		s := openTestStore(t)
 		job := sampleJob("gen-test", "serpapi")
-		s.CreateJob(ctx, job)
+		s.CreateJob(ctx, 0, job)
 
-		err := s.UpdateJobGenerated(ctx, job.ID, "<h1>Resume</h1>", "<h1>Cover</h1>", "/out/resume.pdf", "/out/cover.pdf")
+		err := s.UpdateJobGenerated(ctx, 0, job.ID, "<h1>Resume</h1>", "<h1>Cover</h1>", "/out/resume.pdf", "/out/cover.pdf")
 		if err != nil {
 			t.Fatalf("UpdateJobGenerated error = %v", err)
 		}
 
-		got, _ := s.GetJob(ctx, job.ID)
+		got, _ := s.GetJob(ctx, 0, job.ID)
 		if got.ResumeHTML != "<h1>Resume</h1>" {
 			t.Errorf("ResumeHTML = %q", got.ResumeHTML)
 		}
@@ -309,4 +309,286 @@ func TestCreateScrapeRun(t *testing.T) {
 			t.Fatalf("CreateScrapeRun error = %v", err)
 		}
 	})
+}
+
+// ─── CreateJob_WithUserID ────────────────────────────────────────────────────
+
+func TestCreateJob_WithUserID(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	// Create a user first.
+	user := &models.User{
+		Provider:   "google",
+		ProviderID: "user-1",
+		Email:      "test@example.com",
+	}
+	user, err := s.UpsertUser(ctx, user)
+	if err != nil {
+		t.Fatalf("UpsertUser error = %v", err)
+	}
+
+	job := sampleJob("ext-user", "serpapi")
+	inserted, err := s.CreateJob(ctx, user.ID, job)
+	if err != nil {
+		t.Fatalf("CreateJob error = %v", err)
+	}
+	if !inserted {
+		t.Error("CreateJob returned false, want true")
+	}
+
+	got, err := s.GetJob(ctx, user.ID, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob error = %v", err)
+	}
+	if got.UserID != user.ID {
+		t.Errorf("UserID = %d, want %d", got.UserID, user.ID)
+	}
+}
+
+// ─── ListJobs_UserIsolation ─────────────────────────────────────────────────
+
+func TestListJobs_UserIsolation(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	// Create two users.
+	u1, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "u1", Email: "u1@test.com"})
+	if err != nil {
+		t.Fatalf("UpsertUser u1 error = %v", err)
+	}
+	u2, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "u2", Email: "u2@test.com"})
+	if err != nil {
+		t.Fatalf("UpsertUser u2 error = %v", err)
+	}
+
+	// Create jobs for each user.
+	j1 := sampleJob("iso-1", "serpapi")
+	j2 := sampleJob("iso-2", "serpapi")
+	s.CreateJob(ctx, u1.ID, j1)
+	s.CreateJob(ctx, u2.ID, j2)
+
+	t.Run("user1 sees only own jobs", func(t *testing.T) {
+		jobs, err := s.ListJobs(ctx, u1.ID, ListJobsFilter{})
+		if err != nil {
+			t.Fatalf("ListJobs error = %v", err)
+		}
+		if len(jobs) != 1 {
+			t.Fatalf("len = %d, want 1", len(jobs))
+		}
+		if jobs[0].ExternalID != "iso-1" {
+			t.Errorf("ExternalID = %q, want iso-1", jobs[0].ExternalID)
+		}
+	})
+
+	t.Run("user2 sees only own jobs", func(t *testing.T) {
+		jobs, err := s.ListJobs(ctx, u2.ID, ListJobsFilter{})
+		if err != nil {
+			t.Fatalf("ListJobs error = %v", err)
+		}
+		if len(jobs) != 1 {
+			t.Fatalf("len = %d, want 1", len(jobs))
+		}
+		if jobs[0].ExternalID != "iso-2" {
+			t.Errorf("ExternalID = %q, want iso-2", jobs[0].ExternalID)
+		}
+	})
+
+	t.Run("userID 0 sees all jobs", func(t *testing.T) {
+		jobs, err := s.ListJobs(ctx, 0, ListJobsFilter{})
+		if err != nil {
+			t.Fatalf("ListJobs error = %v", err)
+		}
+		if len(jobs) != 2 {
+			t.Errorf("len = %d, want 2", len(jobs))
+		}
+	})
+}
+
+// ─── Per-User Job Dedup ─────────────────────────────────────────────────────
+
+func TestCreateJob_PerUserDedup(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	u1, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "dedup-u1", Email: "d1@test.com"})
+	if err != nil {
+		t.Fatalf("UpsertUser u1 error = %v", err)
+	}
+
+	t.Run("same user same external_id+source is deduped", func(t *testing.T) {
+		j1 := sampleJob("dedup-ext", "serpapi")
+		j2 := sampleJob("dedup-ext", "serpapi")
+		ins1, _ := s.CreateJob(ctx, u1.ID, j1)
+		ins2, err := s.CreateJob(ctx, u1.ID, j2)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		if !ins1 {
+			t.Error("first insert should return true")
+		}
+		if ins2 {
+			t.Error("second insert for same user+ext+source should return false")
+		}
+	})
+
+	t.Run("different users can have same external_id+source (BUG-001 fixed)", func(t *testing.T) {
+		// BUG-001 was fixed by migration 004 which removed the legacy
+		// UNIQUE(external_id, source) constraint. Per-user dedup now works.
+		u2, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "dedup-u2", Email: "d2@test.com"})
+		if err != nil {
+			t.Fatalf("UpsertUser u2 error = %v", err)
+		}
+
+		j3 := sampleJob("dedup-ext2", "serpapi")
+		ins1, _ := s.CreateJob(ctx, u1.ID, j3)
+		if !ins1 {
+			t.Fatal("first insert should succeed")
+		}
+
+		j4 := sampleJob("dedup-ext2", "serpapi")
+		ins2, err := s.CreateJob(ctx, u2.ID, j4)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		if !ins2 {
+			t.Error("second insert for different user should succeed (BUG-001 should be fixed)")
+		}
+	})
+}
+
+// ─── Cross-User GetJob Access ───────────────────────────────────────────────
+
+func TestGetJob_CrossUserAccess(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "cross-u1", Email: "cu1@test.com"})
+	u2, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "cross-u2", Email: "cu2@test.com"})
+
+	j := sampleJob("cross-get", "serpapi")
+	s.CreateJob(ctx, u1.ID, j)
+
+	t.Run("owner can read own job", func(t *testing.T) {
+		got, err := s.GetJob(ctx, u1.ID, j.ID)
+		if err != nil {
+			t.Fatalf("GetJob error = %v", err)
+		}
+		if got.ID != j.ID {
+			t.Errorf("ID = %d, want %d", got.ID, j.ID)
+		}
+	})
+
+	t.Run("other user cannot read job", func(t *testing.T) {
+		_, err := s.GetJob(ctx, u2.ID, j.ID)
+		if err == nil {
+			t.Error("GetJob should return error for cross-user access")
+		}
+	})
+
+	t.Run("userID 0 bypasses user scoping", func(t *testing.T) {
+		got, err := s.GetJob(ctx, 0, j.ID)
+		if err != nil {
+			t.Fatalf("GetJob(0) error = %v", err)
+		}
+		if got.ID != j.ID {
+			t.Errorf("ID = %d, want %d", got.ID, j.ID)
+		}
+	})
+}
+
+// ─── Cross-User UpdateJobStatus ─────────────────────────────────────────────
+
+func TestUpdateJobStatus_CrossUser(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "status-u1", Email: "su1@test.com"})
+	u2, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "status-u2", Email: "su2@test.com"})
+
+	j := sampleJob("cross-status", "serpapi")
+	s.CreateJob(ctx, u1.ID, j)
+
+	t.Run("other user cannot update job status", func(t *testing.T) {
+		err := s.UpdateJobStatus(ctx, u2.ID, j.ID, models.StatusNotified)
+		if err == nil {
+			t.Error("UpdateJobStatus should fail for cross-user access")
+		}
+	})
+
+	t.Run("owner can update own job status", func(t *testing.T) {
+		err := s.UpdateJobStatus(ctx, u1.ID, j.ID, models.StatusNotified)
+		if err != nil {
+			t.Fatalf("UpdateJobStatus error = %v", err)
+		}
+		got, _ := s.GetJob(ctx, u1.ID, j.ID)
+		if got.Status != models.StatusNotified {
+			t.Errorf("Status = %q, want notified", got.Status)
+		}
+	})
+}
+
+// ─── Job with nonexistent user_id ───────────────────────────────────────────
+
+func TestCreateJob_NonexistentUser(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	t.Run("insert succeeds with nonexistent user_id (no FK)", func(t *testing.T) {
+		j := sampleJob("no-fk", "serpapi")
+		inserted, err := s.CreateJob(ctx, 99999, j)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		if !inserted {
+			t.Error("expected insert to succeed")
+		}
+	})
+}
+
+// ─── Migration Idempotency with file-backed DB ─────────────────────────────
+
+func TestOpen_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := dir + "/test.db"
+
+	// First open: creates schema and runs migrations.
+	s1, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("first Open error = %v", err)
+	}
+
+	// Insert some data.
+	ctx := context.Background()
+	user := &models.User{Provider: "google", ProviderID: "idem-1", Email: "idem@test.com"}
+	user, err = s1.UpsertUser(ctx, user)
+	if err != nil {
+		t.Fatalf("UpsertUser error = %v", err)
+	}
+	j := sampleJob("idem-job", "serpapi")
+	s1.CreateJob(ctx, user.ID, j)
+	s1.Close()
+
+	// Second open: should succeed and data should survive.
+	s2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("second Open error = %v", err)
+	}
+	defer s2.Close()
+
+	got, err := s2.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUser after re-open error = %v", err)
+	}
+	if got.Email != "idem@test.com" {
+		t.Errorf("Email = %q, want idem@test.com", got.Email)
+	}
+
+	gotJob, err := s2.GetJob(ctx, user.ID, j.ID)
+	if err != nil {
+		t.Fatalf("GetJob after re-open error = %v", err)
+	}
+	if gotJob.ExternalID != "idem-job" {
+		t.Errorf("ExternalID = %q, want idem-job", gotJob.ExternalID)
+	}
 }

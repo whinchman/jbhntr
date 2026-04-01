@@ -15,21 +15,28 @@ import (
 
 // StoreWriter is the subset of store.Store needed by the Scheduler.
 type StoreWriter interface {
-	CreateJob(ctx context.Context, job *models.Job) (bool, error)
+	CreateJob(ctx context.Context, userID int64, job *models.Job) (bool, error)
 	CreateScrapeRun(ctx context.Context, run *store.ScrapeRun) error
-	UpdateJobStatus(ctx context.Context, id int64, status models.JobStatus) error
-	UpdateJobSummary(ctx context.Context, id int64, summary, extractedSalary string) error
+	UpdateJobStatus(ctx context.Context, userID int64, id int64, status models.JobStatus) error
+	UpdateJobSummary(ctx context.Context, userID int64, id int64, summary, extractedSalary string) error
+}
+
+// UserFilterReader provides access to per-user search filters.
+// The scheduler uses this to iterate users and their search queries.
+type UserFilterReader interface {
+	ListActiveUserIDs(ctx context.Context) ([]int64, error)
+	ListUserFilters(ctx context.Context, userID int64) ([]models.UserSearchFilter, error)
 }
 
 // Scheduler periodically searches all configured filters and persists new jobs.
 type Scheduler struct {
-	source     Source
-	store      StoreWriter
-	notifier   notifier.Notifier
-	summarizer generator.Summarizer
-	filters    []models.SearchFilter
-	interval   time.Duration
-	logger     *slog.Logger
+	source      Source
+	store       StoreWriter
+	userFilters UserFilterReader
+	notifier    notifier.Notifier
+	summarizer  generator.Summarizer
+	interval    time.Duration
+	logger      *slog.Logger
 
 	mu           sync.Mutex
 	lastScrapeAt time.Time
@@ -44,16 +51,16 @@ func (s *Scheduler) LastScrapeAt() time.Time {
 }
 
 // NewScheduler constructs a Scheduler. If logger is nil, slog.Default() is used.
-func NewScheduler(source Source, st StoreWriter, filters []models.SearchFilter, interval time.Duration, logger *slog.Logger) *Scheduler {
+func NewScheduler(source Source, st StoreWriter, uf UserFilterReader, interval time.Duration, logger *slog.Logger) *Scheduler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Scheduler{
-		source:   source,
-		store:    st,
-		filters:  filters,
-		interval: interval,
-		logger:   logger,
+		source:      source,
+		store:       st,
+		userFilters: uf,
+		interval:    interval,
+		logger:      logger,
 	}
 }
 
@@ -70,17 +77,33 @@ func (s *Scheduler) WithSummarizer(sum generator.Summarizer) *Scheduler {
 	return s
 }
 
-// RunOnce executes one full scrape cycle across all search filters.
-// It returns the slice of newly discovered (inserted) jobs.
+// RunOnce executes one full scrape cycle across all users and their search
+// filters. It returns the slice of newly discovered (inserted) jobs.
+// Individual user/filter errors are logged and skipped so that one user's
+// failure does not block other users.
 func (s *Scheduler) RunOnce(ctx context.Context) ([]models.Job, error) {
 	var newJobs []models.Job
 
-	for _, filter := range s.filters {
-		jobs, err := s.runFilter(ctx, filter)
+	userIDs, err := s.userFilters.ListActiveUserIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: list active users: %w", err)
+	}
+
+	for _, userID := range userIDs {
+		filters, err := s.userFilters.ListUserFilters(ctx, userID)
 		if err != nil {
-			return newJobs, err
+			s.logger.Error("failed to list filters for user", "user_id", userID, "error", err)
+			continue
 		}
-		newJobs = append(newJobs, jobs...)
+		for _, uf := range filters {
+			filter := userFilterToSearchFilter(uf)
+			jobs, err := s.runFilter(ctx, userID, filter)
+			if err != nil {
+				s.logger.Error("scrape filter failed", "user_id", userID, "filter", filter.Keywords, "error", err)
+				continue
+			}
+			newJobs = append(newJobs, jobs...)
+		}
 	}
 
 	s.mu.Lock()
@@ -90,8 +113,21 @@ func (s *Scheduler) RunOnce(ctx context.Context) ([]models.Job, error) {
 	return newJobs, nil
 }
 
-// runFilter runs one search filter: searches, stores results, logs the run.
-func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) ([]models.Job, error) {
+// userFilterToSearchFilter converts a per-user database filter to the
+// SearchFilter type used by the Source interface.
+func userFilterToSearchFilter(uf models.UserSearchFilter) models.SearchFilter {
+	return models.SearchFilter{
+		Keywords:  uf.Keywords,
+		Location:  uf.Location,
+		MinSalary: uf.MinSalary,
+		MaxSalary: uf.MaxSalary,
+		Title:     uf.Title,
+	}
+}
+
+// runFilter runs one search filter for a specific user: searches, stores
+// results, logs the run.
+func (s *Scheduler) runFilter(ctx context.Context, userID int64, filter models.SearchFilter) ([]models.Job, error) {
 	started := time.Now()
 	run := &store.ScrapeRun{
 		Source:         "serpapi",
@@ -117,7 +153,7 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 		if job.Status == "" {
 			job.Status = models.StatusDiscovered
 		}
-		inserted, err := s.store.CreateJob(ctx, job)
+		inserted, err := s.store.CreateJob(ctx, userID, job)
 		if err != nil {
 			s.logger.Error("failed to store job", "error", err, "external_id", job.ExternalID)
 			continue
@@ -135,6 +171,7 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 	}
 
 	s.logger.Info("scrape complete",
+		"user_id", userID,
 		"filter", filter.Keywords,
 		"found", run.JobsFound,
 		"new", run.JobsNew,
@@ -148,7 +185,7 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 				s.logger.Error("failed to summarize job", "job_id", job.ID, "error", err)
 				continue
 			}
-			if err := s.store.UpdateJobSummary(ctx, job.ID, summary, salary); err != nil {
+			if err := s.store.UpdateJobSummary(ctx, userID, job.ID, summary, salary); err != nil {
 				s.logger.Error("failed to save job summary", "job_id", job.ID, "error", err)
 				continue
 			}
@@ -163,7 +200,7 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 				s.logger.Error("failed to send notification", "job_id", job.ID, "error", err)
 				continue
 			}
-			if err := s.store.UpdateJobStatus(ctx, job.ID, models.StatusNotified); err != nil {
+			if err := s.store.UpdateJobStatus(ctx, userID, job.ID, models.StatusNotified); err != nil {
 				s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
 			}
 		}

@@ -15,11 +15,11 @@ import (
 
 // WorkerStore is the subset of store.Store the Worker needs.
 type WorkerStore interface {
-	GetJob(ctx context.Context, id int64) (*models.Job, error)
-	ListJobs(ctx context.Context, f store.ListJobsFilter) ([]models.Job, error)
-	UpdateJobStatus(ctx context.Context, id int64, status models.JobStatus) error
-	UpdateJobGenerated(ctx context.Context, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error
-	UpdateJobError(ctx context.Context, id int64, errMsg string) error
+	GetJob(ctx context.Context, userID int64, id int64) (*models.Job, error)
+	ListJobs(ctx context.Context, userID int64, f store.ListJobsFilter) ([]models.Job, error)
+	UpdateJobStatus(ctx context.Context, userID int64, id int64, status models.JobStatus) error
+	UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error
+	UpdateJobError(ctx context.Context, userID int64, id int64, errMsg string) error
 }
 
 // Worker polls for approved jobs, generates documents, and converts them to PDF.
@@ -72,7 +72,8 @@ func (w *Worker) Start(ctx context.Context) {
 
 // processApproved queries for approved jobs and generates documents for each.
 func (w *Worker) processApproved(ctx context.Context) error {
-	jobs, err := w.store.ListJobs(ctx, store.ListJobsFilter{Status: models.StatusApproved})
+	// userID=0: worker processes jobs across all users (unscoped query).
+	jobs, err := w.store.ListJobs(ctx, 0, store.ListJobsFilter{Status: models.StatusApproved})
 	if err != nil {
 		return fmt.Errorf("worker: list approved jobs: %w", err)
 	}
@@ -86,7 +87,8 @@ func (w *Worker) processApproved(ctx context.Context) error {
 func (w *Worker) processJob(ctx context.Context, job models.Job) {
 	log := w.logger.With("job_id", job.ID, "title", job.Title)
 
-	if err := w.store.UpdateJobStatus(ctx, job.ID, models.StatusGenerating); err != nil {
+	// userID=0: worker processes jobs across all users (unscoped query).
+	if err := w.store.UpdateJobStatus(ctx, 0, job.ID, models.StatusGenerating); err != nil {
 		log.Error("failed to set status generating", "error", err)
 		return
 	}
@@ -124,13 +126,15 @@ func (w *Worker) processJob(ctx context.Context, job models.Job) {
 		return
 	}
 
-	if err := w.store.UpdateJobGenerated(ctx, job.ID, resumeHTML, coverHTML, resumePDF, coverPDF); err != nil {
+	// userID=0: worker processes jobs across all users (unscoped query).
+	if err := w.store.UpdateJobGenerated(ctx, 0, job.ID, resumeHTML, coverHTML, resumePDF, coverPDF); err != nil {
 		log.Error("failed to save generated paths", "error", err)
 		w.failJob(ctx, job.ID, err.Error())
 		return
 	}
 
-	if err := w.store.UpdateJobStatus(ctx, job.ID, models.StatusComplete); err != nil {
+	// userID=0: worker processes jobs across all users (unscoped query).
+	if err := w.store.UpdateJobStatus(ctx, 0, job.ID, models.StatusComplete); err != nil {
 		log.Error("failed to set status complete", "error", err)
 		return
 	}
@@ -139,7 +143,8 @@ func (w *Worker) processJob(ctx context.Context, job models.Job) {
 }
 
 func (w *Worker) failJob(ctx context.Context, id int64, errMsg string) {
-	if err := w.store.UpdateJobError(ctx, id, errMsg); err != nil {
+	// userID=0: worker processes jobs across all users (unscoped query).
+	if err := w.store.UpdateJobError(ctx, 0, id, errMsg); err != nil {
 		w.logger.Error("failed to set job error", "job_id", id, "error", err)
 	}
 }

@@ -68,7 +68,7 @@ func newMockWorkerStore(jobs ...*models.Job) *mockWorkerStore {
 	return m
 }
 
-func (m *mockWorkerStore) GetJob(_ context.Context, id int64) (*models.Job, error) {
+func (m *mockWorkerStore) GetJob(_ context.Context, _ int64, id int64) (*models.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j, ok := m.jobs[id]
@@ -79,7 +79,7 @@ func (m *mockWorkerStore) GetJob(_ context.Context, id int64) (*models.Job, erro
 	return &cp, nil
 }
 
-func (m *mockWorkerStore) ListJobs(_ context.Context, f store.ListJobsFilter) ([]models.Job, error) {
+func (m *mockWorkerStore) ListJobs(_ context.Context, _ int64, f store.ListJobsFilter) ([]models.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var result []models.Job
@@ -92,7 +92,7 @@ func (m *mockWorkerStore) ListJobs(_ context.Context, f store.ListJobsFilter) ([
 	return result, nil
 }
 
-func (m *mockWorkerStore) UpdateJobStatus(_ context.Context, id int64, status models.JobStatus) error {
+func (m *mockWorkerStore) UpdateJobStatus(_ context.Context, _ int64, id int64, status models.JobStatus) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.updates = append(m.updates, statusUpdate{id, status})
@@ -102,14 +102,14 @@ func (m *mockWorkerStore) UpdateJobStatus(_ context.Context, id int64, status mo
 	return nil
 }
 
-func (m *mockWorkerStore) UpdateJobGenerated(_ context.Context, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
+func (m *mockWorkerStore) UpdateJobGenerated(_ context.Context, _ int64, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.generated = append(m.generated, generatedUpdate{id, resumeHTML, coverHTML, resumePDF, coverPDF})
 	return nil
 }
 
-func (m *mockWorkerStore) UpdateJobError(_ context.Context, id int64, errMsg string) error {
+func (m *mockWorkerStore) UpdateJobError(_ context.Context, _ int64, id int64, errMsg string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.updates = append(m.updates, statusUpdate{id, models.StatusFailed})

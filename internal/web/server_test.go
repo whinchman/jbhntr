@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,7 +14,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/store"
 	"github.com/whinchman/jobhuntr/internal/web"
@@ -33,22 +34,28 @@ func newMockJobStore(jobs ...*models.Job) *mockJobStore {
 	return m
 }
 
-func (m *mockJobStore) GetJob(_ context.Context, id int64) (*models.Job, error) {
+func (m *mockJobStore) GetJob(_ context.Context, userID int64, id int64) (*models.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j, ok := m.jobs[id]
 	if !ok {
 		return nil, fmt.Errorf("store: job %d not found", id)
 	}
+	if userID != 0 && j.UserID != userID {
+		return nil, fmt.Errorf("store: job %d not found", id)
+	}
 	cp := *j
 	return &cp, nil
 }
 
-func (m *mockJobStore) ListJobs(_ context.Context, f store.ListJobsFilter) ([]models.Job, error) {
+func (m *mockJobStore) ListJobs(_ context.Context, userID int64, f store.ListJobsFilter) ([]models.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var result []models.Job
 	for _, j := range m.jobs {
+		if userID != 0 && j.UserID != userID {
+			continue
+		}
 		if f.Status != "" && j.Status != f.Status {
 			continue
 		}
@@ -57,14 +64,70 @@ func (m *mockJobStore) ListJobs(_ context.Context, f store.ListJobsFilter) ([]mo
 	return result, nil
 }
 
-func (m *mockJobStore) UpdateJobStatus(_ context.Context, id int64, newStatus models.JobStatus) error {
+func (m *mockJobStore) UpdateJobStatus(_ context.Context, userID int64, id int64, newStatus models.JobStatus) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j, ok := m.jobs[id]
 	if !ok {
 		return fmt.Errorf("store: job %d not found", id)
 	}
+	if userID != 0 && j.UserID != userID {
+		return fmt.Errorf("store: job %d not found", id)
+	}
 	j.Status = newStatus
+	return nil
+}
+
+// ─── mock FilterStore ───────────────────────────────────────────────────────
+
+type mockFilterStore struct {
+	mu      sync.Mutex
+	filters map[int64][]models.UserSearchFilter
+	resumes map[int64]string
+	nextID  int64
+}
+
+func newMockFilterStore() *mockFilterStore {
+	return &mockFilterStore{
+		filters: make(map[int64][]models.UserSearchFilter),
+		resumes: make(map[int64]string),
+		nextID:  1,
+	}
+}
+
+func (m *mockFilterStore) CreateUserFilter(_ context.Context, userID int64, filter *models.UserSearchFilter) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	filter.ID = m.nextID
+	m.nextID++
+	filter.UserID = userID
+	m.filters[userID] = append(m.filters[userID], *filter)
+	return nil
+}
+
+func (m *mockFilterStore) ListUserFilters(_ context.Context, userID int64) ([]models.UserSearchFilter, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.filters[userID], nil
+}
+
+func (m *mockFilterStore) DeleteUserFilter(_ context.Context, userID int64, filterID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	filters := m.filters[userID]
+	for i, f := range filters {
+		if f.ID == filterID {
+			m.filters[userID] = append(filters[:i], filters[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("store: filter %d not found for user %d", filterID, userID)
+}
+
+func (m *mockFilterStore) UpdateUserResume(_ context.Context, userID int64, markdown string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resumes[userID] = markdown
 	return nil
 }
 
@@ -85,6 +148,22 @@ func newServer(t *testing.T, jobs ...*models.Job) *httptest.Server {
 	ms := newMockJobStore(jobs...)
 	srv := web.NewServer(ms)
 	return httptest.NewServer(srv.Handler())
+}
+
+// extractCSRFToken finds the CSRF meta tag in an HTML body and returns the
+// unescaped token value.
+func extractCSRFToken(body string) string {
+	marker := `name="csrf-token" content="`
+	idx := strings.Index(body, marker)
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(marker)
+	end := strings.Index(body[start:], `"`)
+	if end < 0 {
+		return ""
+	}
+	return html.UnescapeString(body[start : start+end])
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -474,60 +553,30 @@ func TestDownloadCoverPDF(t *testing.T) {
 
 // ─── settings helpers ─────────────────────────────────────────────────────────
 
-// minimalConfigYAML is a complete but minimal config used in settings tests.
-const minimalConfigYAML = `server:
-  port: 8080
-  base_url: "http://localhost:8080"
-scraper:
-  interval: "1h"
-  serpapi_key: "test-key"
-search_filters:
-  - keywords: "golang engineer"
-    location: "Remote"
-    min_salary: 100000
-ntfy:
-  topic: "test"
-  server: "https://ntfy.sh"
-claude:
-  api_key: "test-claude"
-  model: "claude-sonnet-4-20250514"
-resume:
-  path: "./resume.md"
-output:
-  dir: "./output"
-`
-
-// newSettingsServer creates a test server wired with config + file paths.
-// It returns the test server, the config file path, and the resume file path.
-func newSettingsServer(t *testing.T) (*httptest.Server, string, string) {
+// newSettingsServer creates a test server wired with a mockFilterStore.
+// It returns the test server and the mock filter store for assertions.
+func newSettingsServer(t *testing.T) (*httptest.Server, *mockFilterStore) {
 	t.Helper()
-	dir := t.TempDir()
-
-	cfgPath := dir + "/config.yaml"
-	if err := os.WriteFile(cfgPath, []byte(minimalConfigYAML), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	resumePath := dir + "/resume.md"
-	if err := os.WriteFile(resumePath, []byte("# My Resume\n"), 0o644); err != nil {
-		t.Fatalf("write resume: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-
 	ms := newMockJobStore()
-	srv := web.NewServerWithConfig(ms, cfg, cfgPath, resumePath)
+	fs := newMockFilterStore()
+
+	// Seed a filter so tests have data to work with.
+	fs.CreateUserFilter(context.Background(), 0, &models.UserSearchFilter{
+		Keywords:  "golang engineer",
+		Location:  "Remote",
+		MinSalary: 100000,
+	})
+
+	srv := web.NewServerWithConfig(ms, nil, fs, nil)
 	ts := httptest.NewServer(srv.Handler())
-	return ts, cfgPath, resumePath
+	return ts, fs
 }
 
 // ─── settings tests ──────────────────────────────────────────────────────────
 
 func TestSettingsPage(t *testing.T) {
 	t.Run("GET /settings returns 200 HTML", func(t *testing.T) {
-		ts, _, _ := newSettingsServer(t)
+		ts, _ := newSettingsServer(t)
 		defer ts.Close()
 
 		resp, err := ts.Client().Get(ts.URL + "/settings")
@@ -547,8 +596,8 @@ func TestSettingsPage(t *testing.T) {
 }
 
 func TestSaveResume(t *testing.T) {
-	t.Run("POST /settings/resume writes file and redirects", func(t *testing.T) {
-		ts, _, resumePath := newSettingsServer(t)
+	t.Run("POST /settings/resume saves to DB and redirects", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
 		defer ts.Close()
 
 		form := url.Values{"resume": {"# Updated Resume\n\nNew content."}}
@@ -563,19 +612,18 @@ func TestSaveResume(t *testing.T) {
 			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
 		}
 
-		got, err := os.ReadFile(resumePath)
-		if err != nil {
-			t.Fatalf("read resume: %v", err)
-		}
-		if string(got) != "# Updated Resume\n\nNew content." {
-			t.Errorf("resume content = %q, want updated content", string(got))
+		fs.mu.Lock()
+		got := fs.resumes[0]
+		fs.mu.Unlock()
+		if got != "# Updated Resume\n\nNew content." {
+			t.Errorf("resume content = %q, want updated content", got)
 		}
 	})
 }
 
 func TestAddFilter(t *testing.T) {
-	t.Run("POST /settings/filters adds filter and rewrites config", func(t *testing.T) {
-		ts, cfgPath, _ := newSettingsServer(t)
+	t.Run("POST /settings/filters adds filter to DB", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
 		defer ts.Close()
 
 		form := url.Values{
@@ -593,14 +641,13 @@ func TestAddFilter(t *testing.T) {
 			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
 		}
 
-		updated, err := config.Load(cfgPath)
-		if err != nil {
-			t.Fatalf("reload config: %v", err)
+		fs.mu.Lock()
+		filters := fs.filters[0]
+		fs.mu.Unlock()
+		if len(filters) != 2 {
+			t.Fatalf("len(filters) = %d, want 2", len(filters))
 		}
-		if len(updated.SearchFilters) != 2 {
-			t.Errorf("len(search_filters) = %d, want 2", len(updated.SearchFilters))
-		}
-		last := updated.SearchFilters[len(updated.SearchFilters)-1]
+		last := filters[len(filters)-1]
 		if last.Keywords != "senior go engineer" {
 			t.Errorf("last.Keywords = %q, want senior go engineer", last.Keywords)
 		}
@@ -611,11 +658,12 @@ func TestAddFilter(t *testing.T) {
 }
 
 func TestRemoveFilter(t *testing.T) {
-	t.Run("POST /settings/filters/remove?index=0 removes filter", func(t *testing.T) {
-		ts, cfgPath, _ := newSettingsServer(t)
+	t.Run("POST /settings/filters/remove?id=N removes filter from DB", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
 		defer ts.Close()
 
-		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?index=0", "application/x-www-form-urlencoded", nil)
+		// The seeded filter has ID 1.
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?id=1", "application/x-www-form-urlencoded", nil)
 		if err != nil {
 			t.Fatalf("POST /settings/filters/remove: %v", err)
 		}
@@ -625,20 +673,19 @@ func TestRemoveFilter(t *testing.T) {
 			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
 		}
 
-		updated, err := config.Load(cfgPath)
-		if err != nil {
-			t.Fatalf("reload config: %v", err)
-		}
-		if len(updated.SearchFilters) != 0 {
-			t.Errorf("len(search_filters) = %d, want 0", len(updated.SearchFilters))
+		fs.mu.Lock()
+		filters := fs.filters[0]
+		fs.mu.Unlock()
+		if len(filters) != 0 {
+			t.Errorf("len(filters) = %d, want 0", len(filters))
 		}
 	})
 
-	t.Run("POST /settings/filters/remove with out-of-range index returns 400", func(t *testing.T) {
-		ts, _, _ := newSettingsServer(t)
+	t.Run("POST /settings/filters/remove with invalid id returns 400", func(t *testing.T) {
+		ts, _ := newSettingsServer(t)
 		defer ts.Close()
 
-		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?index=99", "application/x-www-form-urlencoded", nil)
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?id=notanid", "application/x-www-form-urlencoded", nil)
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}
@@ -646,6 +693,358 @@ func TestRemoveFilter(t *testing.T) {
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+}
+
+// ─── adversarial / isolation tests ──────────────────────────────────────────
+
+func TestSettingsPage_EmptyState(t *testing.T) {
+	t.Run("settings page with no filters and empty resume returns 200", func(t *testing.T) {
+		ms := newMockJobStore()
+		fs := newMockFilterStore()
+		// No filters seeded, no resume set.
+		srv := web.NewServerWithConfig(ms, nil, fs, nil)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/settings")
+		if err != nil {
+			t.Fatalf("GET /settings: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+}
+
+func TestSaveResume_EmptyContent(t *testing.T) {
+	t.Run("saving empty resume string succeeds", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"resume": {""}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/resume", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/resume: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode/100 != 3 {
+			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
+		}
+
+		fs.mu.Lock()
+		got := fs.resumes[0]
+		fs.mu.Unlock()
+		if got != "" {
+			t.Errorf("resume content = %q, want empty string", got)
+		}
+	})
+}
+
+func TestRemoveFilter_WrongUser(t *testing.T) {
+	t.Run("removing filter belonging to another user returns 500", func(t *testing.T) {
+		ms := newMockJobStore()
+		fs := newMockFilterStore()
+
+		// Create a filter for user 42.
+		fs.CreateUserFilter(context.Background(), 42, &models.UserSearchFilter{
+			Keywords: "user42-only",
+		})
+
+		// Server runs without auth (nil user -> userID=0), so handler uses
+		// userID=0 which does not own filter ID 1.
+		srv := web.NewServerWithConfig(ms, nil, fs, nil)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?id=1", "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatalf("POST /settings/filters/remove: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// The handler should return 500 because the store returns "not found"
+		// for a filter that belongs to user 42 when accessed as user 0.
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Errorf("status = %d, want 500", resp.StatusCode)
+		}
+
+		// Verify the filter was NOT deleted.
+		fs.mu.Lock()
+		remaining := fs.filters[42]
+		fs.mu.Unlock()
+		if len(remaining) != 1 {
+			t.Errorf("filter should not have been deleted, got %d filters for user 42", len(remaining))
+		}
+	})
+}
+
+func TestJobDetail_UserIsolation(t *testing.T) {
+	t.Run("authenticated user cannot view another users job", func(t *testing.T) {
+		// Create a job belonging to user 99.
+		job := &models.Job{
+			ID:       10,
+			UserID:   99,
+			Title:    "Secret Job",
+			Company:  "Other Corp",
+			Location: "Hidden",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		// Try to access job 10 (belongs to user 99) as user 42.
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/jobs/10", nil)
+		req.AddCookie(cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /jobs/10: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (user isolation)", resp.StatusCode)
+		}
+	})
+
+	t.Run("authenticated user can view their own job", func(t *testing.T) {
+		job := &models.Job{
+			ID:       10,
+			UserID:   42,
+			Title:    "My Job",
+			Company:  "My Corp",
+			Location: "Remote",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/jobs/10", nil)
+		req.AddCookie(cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /jobs/10: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+}
+
+func TestAPIJobDetail_UserIsolation(t *testing.T) {
+	t.Run("authenticated user gets 404 for another users job via API", func(t *testing.T) {
+		job := &models.Job{
+			ID:       20,
+			UserID:   99,
+			Title:    "Secret API Job",
+			Company:  "Other Corp",
+			Location: "Hidden",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/jobs/20", nil)
+		req.AddCookie(cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /api/jobs/20: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (user isolation)", resp.StatusCode)
+		}
+	})
+}
+
+func TestDashboard_UserIsolation(t *testing.T) {
+	t.Run("dashboard only shows jobs belonging to authenticated user", func(t *testing.T) {
+		job1 := &models.Job{
+			ID:       1,
+			UserID:   42,
+			Title:    "My Job",
+			Company:  "My Corp",
+			Location: "Remote",
+			Status:   models.StatusDiscovered,
+		}
+		job2 := &models.Job{
+			ID:       2,
+			UserID:   99,
+			Title:    "Other Job",
+			Company:  "Other Corp",
+			Location: "Hidden",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job1, job2)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		client := ts.Client()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/jobs", nil)
+		req.AddCookie(cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /api/jobs: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+
+		var jobs []models.Job
+		if err := json.NewDecoder(resp.Body).Decode(&jobs); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(jobs) != 1 {
+			t.Errorf("len(jobs) = %d, want 1 (only user 42's job)", len(jobs))
+		}
+		if len(jobs) == 1 && jobs[0].ID != 1 {
+			t.Errorf("job.ID = %d, want 1", jobs[0].ID)
+		}
+	})
+}
+
+func TestApproveJob_UserIsolation(t *testing.T) {
+	t.Run("cannot approve another users job", func(t *testing.T) {
+		job := &models.Job{
+			ID:       5,
+			UserID:   99,
+			Title:    "Other Users Job",
+			Company:  "Other Corp",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		// Need CSRF token for POST requests with auth enabled.
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		// GET the dashboard to get the CSRF cookie.
+		getReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+		getReq.AddCookie(cookie)
+		getResp, err := client.Do(getReq)
+		if err != nil {
+			t.Fatalf("GET /: %v", err)
+		}
+
+		var csrfCookie *http.Cookie
+		for _, c := range getResp.Cookies() {
+			if c.Name == "_gorilla_csrf" {
+				csrfCookie = c
+				break
+			}
+		}
+		bodyBytes, _ := io.ReadAll(getResp.Body)
+		getResp.Body.Close()
+
+		csrfToken := extractCSRFToken(string(bodyBytes))
+		if csrfToken == "" || csrfCookie == nil {
+			t.Fatal("could not extract CSRF token/cookie")
+		}
+
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/jobs/5/approve", nil)
+		req.AddCookie(cookie)
+		req.AddCookie(csrfCookie)
+		req.Header.Set("X-CSRF-Token", csrfToken)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST /api/jobs/5/approve: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (user isolation)", resp.StatusCode)
 		}
 	})
 }
