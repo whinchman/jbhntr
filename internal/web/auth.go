@@ -342,9 +342,14 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redirect to the originally-requested URL (stored before the /login
-	// redirect by requireAuth), falling back to "/" if none is set or if
-	// the stored value fails same-origin validation.
+	// For new users, redirect to /onboarding to collect their display name
+	// and optional resume. The return_to session value is preserved so the
+	// onboarding POST handler can redirect to the original destination.
+	// For returning users, consume return_to and redirect normally.
+	if !dbUser.OnboardingComplete {
+		http.Redirect(w, r, "/onboarding", http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, s.consumeReturnTo(w, r), http.StatusSeeOther)
 }
 

@@ -89,11 +89,12 @@ type Server struct {
 	oauthProviders map[string]*oauth2.Config
 	baseURL        string
 
-	templates    *template.Template
-	detailTmpl   *template.Template
-	settingsTmpl *template.Template
-	profileTmpl  *template.Template
-	loginTmpl    *template.Template
+	templates      *template.Template
+	detailTmpl     *template.Template
+	settingsTmpl   *template.Template
+	profileTmpl    *template.Template
+	onboardingTmpl *template.Template
+	loginTmpl      *template.Template
 
 	startTime    time.Time
 	lastScrapeFn func() time.Time // optional; returns last scrape time
@@ -127,19 +128,24 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		"templates/layout.html",
 		"templates/profile.html",
 	))
+	onboardingTmpl := template.Must(template.ParseFS(templateFS,
+		"templates/layout.html",
+		"templates/onboarding.html",
+	))
 	loginTmpl := template.Must(template.ParseFS(templateFS, "templates/login.html"))
 
 	srv := &Server{
-		store:        st,
-		userStore:    us,
-		filterStore:  fs,
-		templates:    tmpl,
-		detailTmpl:   detail,
-		settingsTmpl: settings,
-		profileTmpl:  profileTmpl,
-		loginTmpl:    loginTmpl,
-		startTime:    time.Now(),
-		cfg:          cfg,
+		store:          st,
+		userStore:      us,
+		filterStore:    fs,
+		templates:      tmpl,
+		detailTmpl:     detail,
+		settingsTmpl:   settings,
+		profileTmpl:    profileTmpl,
+		onboardingTmpl: onboardingTmpl,
+		loginTmpl:      loginTmpl,
+		startTime:      time.Now(),
+		cfg:            cfg,
 	}
 
 	// Set up auth if session secret is configured and a user store is available.
@@ -227,6 +233,9 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/settings/resume", s.handleSaveResume)
 		r.Post("/settings/filters", s.handleAddFilter)
 		r.Post("/settings/filters/remove", s.handleRemoveFilter)
+
+		r.Get("/onboarding", s.handleOnboardingGet)
+		r.Post("/onboarding", s.handleOnboardingPost)
 
 		r.Get("/profile", s.handleProfileGet)
 		r.Post("/profile", s.handleProfileSave)
@@ -663,6 +672,100 @@ func (s *Server) handleRemoveFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+}
+
+// ─── onboarding handlers ─────────────────────────────────────────────────────
+
+// onboardingData is the template data for the onboarding page.
+type onboardingData struct {
+	User        *models.User
+	CSRFToken   string
+	DisplayName string
+	Resume      string
+	Error       string
+}
+
+// handleOnboardingGet renders the onboarding form. If the user has already
+// completed onboarding, it redirects them to the home page instead.
+func (s *Server) handleOnboardingGet(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user != nil && user.OnboardingComplete {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	displayName := ""
+	resume := ""
+	if user != nil {
+		displayName = user.DisplayName
+		resume = user.ResumeMarkdown
+	}
+
+	data := onboardingData{
+		User:        user,
+		CSRFToken:   csrf.Token(r),
+		DisplayName: displayName,
+		Resume:      resume,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.onboardingTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+		slog.Error("onboarding template render error", "error", err)
+	}
+}
+
+// handleOnboardingPost processes the onboarding form submission. It validates
+// the display name, calls UpdateUserOnboarding to save the data and set
+// onboarding_complete=true, then redirects to the original destination (if any)
+// or to /.
+func (s *Server) handleOnboardingPost(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	user := UserFromContext(r.Context())
+
+	displayName := strings.TrimSpace(r.FormValue("display_name"))
+	resume := r.FormValue("resume")
+
+	if displayName == "" || len(displayName) > 100 {
+		errMsg := "Display name is required and must be 100 characters or fewer."
+		data := onboardingData{
+			User:        user,
+			CSRFToken:   csrf.Token(r),
+			DisplayName: displayName,
+			Resume:      resume,
+			Error:       errMsg,
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		if err := s.onboardingTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+			slog.Error("onboarding template render error", "error", err)
+		}
+		return
+	}
+
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	if err := s.userStore.UpdateUserOnboarding(r.Context(), userID, displayName, resume); err != nil {
+		slog.Error("failed to save onboarding data", "error", err, "user_id", userID)
+		data := onboardingData{
+			User:        user,
+			CSRFToken:   csrf.Token(r),
+			DisplayName: displayName,
+			Resume:      resume,
+			Error:       "Failed to save your profile. Please try again.",
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := s.onboardingTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+			slog.Error("onboarding template render error", "error", err)
+		}
+		return
+	}
+
+	http.Redirect(w, r, s.consumeReturnTo(w, r), http.StatusSeeOther)
 }
 
 // ─── profile handlers ─────────────────────────────────────────────────────────
