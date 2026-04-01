@@ -1,7 +1,7 @@
 # Task: task3-peruser-routes
 
 **Type:** designer
-**Status:** done
+**Status:** done (verified)
 **Priority:** 2
 **Implementation Branch:** feature/task3-peruser-routes
 **Epic:** oauth-multi-user
@@ -164,3 +164,69 @@ are correctly scoped to task4.
 - `handleRemoveFilter` returns 500 when the filter doesn't belong to the user (store
   returns "not found" error). Ideally this should return 404. This is consistent with
   the existing error handling pattern in other handlers, so not filing as a bug.
+
+## QA
+
+**QA Agent Verdict:** PASS
+
+### Acceptance Criteria Verification
+
+- [x] All handlers extract user from context (no more `userID=0` in web handlers)
+- [x] Dashboard shows only the logged-in user's jobs
+- [x] Job detail returns 404 if job belongs to another user
+- [x] Settings page loads per-user filters from DB
+- [x] Settings page loads per-user resume from DB
+- [x] Saving settings persists per-user filters and resume to DB
+- [x] No file-based resume/config persistence remains in web handlers
+- [x] All template data structs include User and CSRFToken
+- [x] `go build ./...` succeeds
+- [x] `go test ./...` passes (all packages)
+
+### Build & Test Results
+
+- `go build ./...` -- PASS
+- `go test -count=1 ./...` -- PASS (8 packages, 0 failures)
+
+### Dead Code Verification
+
+- No references to `filtersSnapshot`, `writeConfig`, `configPath`, or `resumePath`
+  remain in `internal/web/`.
+- No `os`, `sync`, or `yaml.v3` imports remain in `server.go`.
+- No `TODO(task3)` comments remain in web handlers. The only remaining
+  `TODO(task3)` references are in `internal/generator/worker.go` (correctly
+  scoped to task4).
+
+### New Tests Added (commit 04e0dde)
+
+Made `mockJobStore` user-aware (enforces `userID` scoping when non-zero) and
+added 7 adversarial tests:
+
+1. **TestJobDetail_UserIsolation** -- authenticated user A gets 404 when
+   requesting user B's job via `/jobs/{id}`; can access their own job (200).
+2. **TestAPIJobDetail_UserIsolation** -- same isolation via `/api/jobs/{id}`.
+3. **TestDashboard_UserIsolation** -- `/api/jobs` returns only the
+   authenticated user's jobs, not all jobs.
+4. **TestApproveJob_UserIsolation** -- POST `/api/jobs/{id}/approve` returns
+   404 for another user's job (with full CSRF flow).
+5. **TestRemoveFilter_WrongUser** -- attempting to remove a filter owned by
+   user 42 while unauthenticated (userID=0) returns 500 and does not delete.
+6. **TestSettingsPage_EmptyState** -- settings page with zero filters and
+   empty resume renders 200 without error.
+7. **TestSaveResume_EmptyContent** -- saving an empty string resume succeeds.
+
+### Bugs Found
+
+None new. BUG-002 (filterStore nil panic, filed by code reviewer) remains
+valid but is low severity and not triggered by any current code path.
+
+### Notes
+
+- The nil-guard pattern (`if user != nil { userID = user.ID }`) is consistent
+  across all 9 handlers and correctly falls back to `userID=0` for tests
+  without auth middleware.
+- Template data structs (`dashboardData`, `jobDetailData`, `settingsData`)
+  all include `User *models.User` and `CSRFToken string` fields.
+- The `settings.html` template correctly uses `?id={{$f.ID}}` for filter
+  removal, matching the handler's `r.URL.Query().Get("id")`.
+- The `cfg *config.Config` field is retained on the Server struct (used by
+  auth setup in the constructor), which is correct per the design doc.
