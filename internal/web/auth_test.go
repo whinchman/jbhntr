@@ -47,6 +47,26 @@ func (m *mockUserStore) UpsertUser(_ context.Context, user *models.User) (*model
 	return user, nil
 }
 
+func (m *mockUserStore) UpdateUserOnboarding(_ context.Context, userID int64, displayName string, resume string) error {
+	u, ok := m.users[userID]
+	if !ok {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	u.DisplayName = displayName
+	u.ResumeMarkdown = resume
+	u.OnboardingComplete = true
+	return nil
+}
+
+func (m *mockUserStore) UpdateUserDisplayName(_ context.Context, userID int64, displayName string) error {
+	u, ok := m.users[userID]
+	if !ok {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	u.DisplayName = displayName
+	return nil
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 func newAuthConfig() *config.Config {

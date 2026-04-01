@@ -62,6 +62,8 @@ type JobStore interface {
 type UserStore interface {
 	GetUser(ctx context.Context, id int64) (*models.User, error)
 	UpsertUser(ctx context.Context, user *models.User) (*models.User, error)
+	UpdateUserOnboarding(ctx context.Context, userID int64, displayName string, resume string) error
+	UpdateUserDisplayName(ctx context.Context, userID int64, displayName string) error
 }
 
 // FilterStore is the subset of store.Store used by the settings handlers.

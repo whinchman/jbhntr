@@ -10,9 +10,10 @@ type User struct {
 	Email          string
 	DisplayName    string
 	AvatarURL      string
-	ResumeMarkdown string
-	CreatedAt      time.Time
-	LastLoginAt    time.Time
+	ResumeMarkdown     string
+	OnboardingComplete bool
+	CreatedAt          time.Time
+	LastLoginAt        time.Time
 }
 
 // UserSearchFilter represents a per-user job search query configuration
