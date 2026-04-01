@@ -1,0 +1,52 @@
+project:
+  name: "jobhuntr"
+  description: "A project using the Claude Agent framework"
+
+git:
+  default_branch: "development"
+  feature_prefix: "feature/"
+  commit_style: "conventional"
+
+workflow:
+  plans_dir: "plans"
+  worktrees_dir: "worktrees"
+  backlog_file: "workflow/BACKLOG.md"
+  todo_file: "workflow/TODO.md"
+  done_file: "workflow/DONE.md"
+  bugs_file: "workflow/BUGS.md"
+
+testing:
+  enabled: true
+  command: "npm test"
+  test_dir: "tests/"
+  test_pattern: "test_*"
+
+build:
+  command: ""
+
+code_standards: |
+  - Add your project-specific coding standards here
+
+design:
+  colors:
+    primary: ""
+    secondary: ""
+    background: ""
+    surface: ""
+    text: ""
+  fonts:
+    heading: ""
+    body: ""
+    mono: ""
+  mood: ""
+
+container:
+  template: "base"
+  # dockerfile: ""    # optional custom Dockerfile path relative to project root
+  memory: "8G"
+  cpus: "4"
+
+agents:
+  default_type: "coder"
+  tasks_dir: "tasks"
+  max_workers: 3
