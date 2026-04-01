@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/gorilla/sessions"
@@ -427,4 +428,302 @@ func TestUserFromContext(t *testing.T) {
 			t.Errorf("expected nil user, got %v", u)
 		}
 	})
+}
+
+func TestHandleOAuthCallback_UnknownProvider(t *testing.T) {
+	t.Run("callback with unknown provider returns 400", func(t *testing.T) {
+		us := newMockUserStore()
+		ts := newAuthServer(t, us)
+		defer ts.Close()
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		resp, err := client.Get(ts.URL + "/auth/unknown/callback?code=test&state=test")
+		if err != nil {
+			t.Fatalf("GET /auth/unknown/callback: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+}
+
+func TestHandleOAuthCallback_ProviderError(t *testing.T) {
+	t.Run("callback with error param from provider redirects to /login", func(t *testing.T) {
+		us := newMockUserStore()
+		ts := newAuthServer(t, us)
+		defer ts.Close()
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		// Start the OAuth flow to get a valid session with state stored.
+		startResp, err := client.Get(ts.URL + "/auth/google")
+		if err != nil {
+			t.Fatalf("GET /auth/google: %v", err)
+		}
+		startResp.Body.Close()
+
+		// Extract the redirect URL to get the state parameter.
+		loc := startResp.Header.Get("Location")
+		if loc == "" {
+			t.Fatal("no Location header from /auth/google")
+		}
+		redirectURL, err := url.Parse(loc)
+		if err != nil {
+			t.Fatalf("parse redirect URL: %v", err)
+		}
+		state := redirectURL.Query().Get("state")
+		if state == "" {
+			t.Fatal("no state parameter in redirect URL")
+		}
+
+		// Collect all cookies from the start response (session + CSRF).
+		cookies := startResp.Cookies()
+
+		// Simulate provider returning an error (user denied consent) with
+		// the valid state so it passes state verification and reaches the
+		// error-param check.
+		callbackURL := fmt.Sprintf("%s/auth/google/callback?error=access_denied&error_description=user+denied&state=%s", ts.URL, state)
+		req, _ := http.NewRequest(http.MethodGet, callbackURL, nil)
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET callback with error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusSeeOther)
+		}
+		respLoc := resp.Header.Get("Location")
+		if respLoc != "/login" {
+			t.Errorf("Location = %q, want /login", respLoc)
+		}
+	})
+}
+
+func TestRequireAuth_DeletedUser(t *testing.T) {
+	t.Run("session referencing non-existent user redirects to /login", func(t *testing.T) {
+		// Create mock store with NO users — the session will reference user 99
+		// which does not exist.
+		us := newMockUserStore()
+		ts := newAuthServer(t, us)
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 99)
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+		req.AddCookie(cookie)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusSeeOther)
+		}
+		loc := resp.Header.Get("Location")
+		if loc != "/login" {
+			t.Errorf("Location = %q, want /login", loc)
+		}
+	})
+}
+
+func TestDoubleLogout(t *testing.T) {
+	t.Run("POST /logout without session is blocked (CSRF or requireAuth)", func(t *testing.T) {
+		us := newMockUserStore()
+		ts := newAuthServer(t, us)
+		defer ts.Close()
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		// POST /logout without any cookies. CSRF middleware fires before
+		// requireAuth, so we get 403 (Forbidden). Either way the user cannot
+		// hit the logout handler without a valid session.
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/logout", nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST /logout: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Expect 403 (CSRF) since there's no CSRF token. This proves
+		// unauthenticated users cannot trigger the logout handler.
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("status = %d, want %d (CSRF rejection)", resp.StatusCode, http.StatusForbidden)
+		}
+	})
+}
+
+func TestHandleLogout_HTMX(t *testing.T) {
+	t.Run("HTMX POST /logout returns HX-Redirect header", func(t *testing.T) {
+		testUser := &models.User{
+			ID:          1,
+			Provider:    "github",
+			ProviderID:  "gh-1",
+			Email:       "dev@example.com",
+			DisplayName: "Dev",
+		}
+		us := newMockUserStore(testUser)
+		ts := newAuthServer(t, us)
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 1)
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		// GET / to obtain CSRF cookie and token.
+		getReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+		getReq.AddCookie(cookie)
+		getResp, err := client.Do(getReq)
+		if err != nil {
+			t.Fatalf("GET /: %v", err)
+		}
+
+		var csrfCookie *http.Cookie
+		for _, c := range getResp.Cookies() {
+			if c.Name == "_gorilla_csrf" {
+				csrfCookie = c
+				break
+			}
+		}
+		if csrfCookie == nil {
+			t.Fatal("CSRF cookie not found")
+		}
+
+		bodyBytes, err := io.ReadAll(getResp.Body)
+		getResp.Body.Close()
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		body := string(bodyBytes)
+
+		csrfToken := ""
+		marker := `name="csrf-token" content="`
+		if idx := findIndex(body, marker); idx >= 0 {
+			start := idx + len(marker)
+			end := findIndex(body[start:], `"`)
+			if end >= 0 {
+				csrfToken = html.UnescapeString(body[start : start+end])
+			}
+		}
+		if csrfToken == "" {
+			t.Fatal("could not extract CSRF token")
+		}
+
+		// POST /logout with HX-Request header.
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/logout", nil)
+		req.AddCookie(cookie)
+		req.AddCookie(csrfCookie)
+		req.Header.Set("X-CSRF-Token", csrfToken)
+		req.Header.Set("HX-Request", "true")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST /logout: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		hxRedirect := resp.Header.Get("HX-Redirect")
+		if hxRedirect != "/login" {
+			t.Errorf("HX-Redirect = %q, want /login", hxRedirect)
+		}
+	})
+}
+
+func TestProtectedRoutes_Unauthenticated(t *testing.T) {
+	routes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/"},
+		{http.MethodGet, "/jobs/1"},
+		{http.MethodGet, "/settings"},
+		{http.MethodGet, "/api/jobs"},
+		{http.MethodGet, "/api/jobs/1"},
+		{http.MethodGet, "/partials/job-table"},
+	}
+
+	us := newMockUserStore()
+	ts := newAuthServer(t, us)
+	defer ts.Close()
+
+	client := ts.Client()
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	for _, rt := range routes {
+		t.Run(fmt.Sprintf("%s %s redirects to /login", rt.method, rt.path), func(t *testing.T) {
+			req, _ := http.NewRequest(rt.method, ts.URL+rt.path, nil)
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", rt.method, rt.path, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusSeeOther)
+			}
+			loc := resp.Header.Get("Location")
+			if loc != "/login" {
+				t.Errorf("Location = %q, want /login", loc)
+			}
+		})
+	}
+}
+
+func TestPublicRoutes_NoAuth(t *testing.T) {
+	routes := []struct {
+		path       string
+		wantStatus int
+	}{
+		{"/login", http.StatusOK},
+		{"/health", http.StatusOK},
+	}
+
+	us := newMockUserStore()
+	ts := newAuthServer(t, us)
+	defer ts.Close()
+
+	for _, rt := range routes {
+		t.Run(fmt.Sprintf("GET %s returns %d without auth", rt.path, rt.wantStatus), func(t *testing.T) {
+			resp, err := ts.Client().Get(ts.URL + rt.path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", rt.path, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != rt.wantStatus {
+				t.Errorf("status = %d, want %d", resp.StatusCode, rt.wantStatus)
+			}
+		})
+	}
 }
