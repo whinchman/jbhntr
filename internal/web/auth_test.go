@@ -3,6 +3,8 @@ package web_test
 import (
 	"context"
 	"fmt"
+	"html"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -252,14 +254,13 @@ func TestHandleLogout(t *testing.T) {
 			return http.ErrUseLastResponse
 		}
 
-		// First get a CSRF token from the login page (which sets the CSRF cookie).
+		// GET / with the session cookie to get the dashboard + CSRF token.
 		getReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
 		getReq.AddCookie(cookie)
 		getResp, err := client.Do(getReq)
 		if err != nil {
 			t.Fatalf("GET /: %v", err)
 		}
-		getResp.Body.Close()
 
 		// Extract CSRF cookie from the response.
 		var csrfCookie *http.Cookie
@@ -273,48 +274,31 @@ func TestHandleLogout(t *testing.T) {
 			t.Fatal("CSRF cookie not found in GET / response")
 		}
 
-		// Extract the CSRF token from response body or use the masked token.
-		// gorilla/csrf also accepts X-CSRF-Token header.
-		// We need to get the token from the page; for testing we can get the
-		// unmasked token by calling the test helper.
-		// Since we can't easily extract from HTML, let's get a fresh page and
-		// parse the meta tag. Instead, let's just use the cookie-based approach.
-		// Actually, gorilla/csrf has a function to get the token from the cookie,
-		// but the simpler approach for testing is to disable redirect following
-		// and just check the redirect. We already have the CSRF cookie.
-
-		// For POST /logout, we need the CSRF token. Let's parse it from the
-		// dashboard HTML response. We'll re-fetch with redirect following.
-		getReq2, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
-		getReq2.AddCookie(cookie)
-		getReq2.AddCookie(csrfCookie)
-		clientFollow := ts.Client()
-		getResp2, err := clientFollow.Do(getReq2)
+		// Read entire response body to find CSRF token in meta tag.
+		bodyBytes, err := io.ReadAll(getResp.Body)
+		getResp.Body.Close()
 		if err != nil {
-			t.Fatalf("GET / (2): %v", err)
+			t.Fatalf("read body: %v", err)
 		}
-		defer getResp2.Body.Close()
-
-		// Read response body to find CSRF token in meta tag.
-		buf := make([]byte, 32768)
-		n, _ := getResp2.Body.Read(buf)
-		body := string(buf[:n])
+		body := string(bodyBytes)
 
 		// Extract token from: <meta name="csrf-token" content="TOKEN">
+		// html/template may HTML-encode characters like + as &#43; so we
+		// unescape the extracted value to get the raw base64 token.
 		csrfToken := ""
 		marker := `name="csrf-token" content="`
 		if idx := findIndex(body, marker); idx >= 0 {
 			start := idx + len(marker)
 			end := findIndex(body[start:], `"`)
 			if end >= 0 {
-				csrfToken = body[start : start+end]
+				csrfToken = html.UnescapeString(body[start : start+end])
 			}
 		}
 		if csrfToken == "" {
 			t.Fatal("could not extract CSRF token from dashboard page")
 		}
 
-		// Now POST /logout with the session cookie, CSRF cookie, and CSRF token.
+		// POST /logout with the session cookie, CSRF cookie, and CSRF token.
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/logout", nil)
 		req.AddCookie(cookie)
 		req.AddCookie(csrfCookie)
@@ -324,10 +308,16 @@ func TestHandleLogout(t *testing.T) {
 		if err != nil {
 			t.Fatalf("POST /logout: %v", err)
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusSeeOther {
+			failBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Logf("CSRF cookie value len=%d", len(csrfCookie.Value))
+			t.Logf("CSRF token len=%d, value=%q", len(csrfToken), csrfToken)
+			t.Logf("Response body: %s", string(failBody))
 			t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusSeeOther)
+		} else {
+			resp.Body.Close()
 		}
 		loc := resp.Header.Get("Location")
 		if loc != "/login" {

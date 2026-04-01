@@ -71,8 +71,12 @@ func oauthProviders(authCfg config.AuthConfig, baseURL string) map[string]*oauth
 }
 
 // getUserFromSession loads the user_id from the session cookie and fetches
-// the full User from the store. Returns (nil, false) if no valid session.
+// the full User from the store. Returns (nil, false) if no valid session or
+// if session support is not configured.
 func (s *Server) getUserFromSession(r *http.Request) (*models.User, bool) {
+	if s.sessionStore == nil {
+		return nil, false
+	}
 	sess, err := s.sessionStore.Get(r, sessionName)
 	if err != nil {
 		return nil, false
@@ -360,8 +364,15 @@ func fetchGitHubPrimaryEmail(ctx context.Context, client *http.Client) (string, 
 }
 
 // handleLogout clears the session and redirects to the login page.
+// For HTMX requests it uses the HX-Redirect header so the browser performs
+// a full page navigation instead of swapping the response into the DOM.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.clearSession(w, r)
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", "/login")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
