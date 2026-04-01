@@ -1,7 +1,7 @@
 # Task: auth-task5-profile
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Branch**: feature/auth-task5-profile
 - **Source Item**: Full Sign-In / Sign-Up Flow
 - **Dependencies**: auth-task1-model
@@ -26,7 +26,20 @@ Create the account/profile page at `/profile` where authenticated users can upda
 
 ## Notes
 
-From the architecture plan:
+### Completion Summary (feature/auth-task5-profile)
+
+Implemented on branch `feature/auth-task5-profile`.
+
+**Files changed:**
+- `internal/web/server.go` — added `profileTmpl` field to `Server`, parsed `templates/profile.html` in `NewServerWithConfig`, registered `GET /profile` and `POST /profile` routes in the `requireAuth` group, added `profileData` struct, `handleProfileGet`, and `handleProfileSave` handlers
+- `internal/web/templates/profile.html` — new template: display name edit form (POST /profile), connected provider info (read-only: provider name, email, provider ID, avatar), sign out button via `hx-post="/logout"`, success/error banners
+- `internal/web/templates/layout.html` — added `Profile` nav link in the `{{if .User}}` block; added `Sign in` link in the new `{{else}}` block for logged-out visitors
+
+**Validation:** `display_name` trimmed, must be non-empty and at most 100 characters; validation errors render inline without redirect. Success redirects to `/profile?saved=1`.
+
+Go toolchain not available in the container; no build verification possible. Code reviewed manually against existing patterns.
+
+### From the architecture plan:
 
 Template data struct:
 ```go
