@@ -26,6 +26,29 @@ Make the dashboard auth-aware by introducing an `optionalAuth` middleware. Unaut
 
 ## Notes
 
+### Code Review (code-reviewer agent — 2026-04-01)
+
+**Verdict: request-changes**
+
+**Findings: 0 critical, 3 warning, 2 info**
+
+#### [WARNING] auth_test.go:681 — TestProtectedRoutes_Unauthenticated tests stale expectations (BUG-005)
+`GET /` and `GET /partials/job-table` are now under `optionalAuth`; the test still asserts `303 → /login`. These two sub-tests will fail. Tracked as BUG-005.
+
+#### [WARNING] auth.go:297 — OAuth state token not saved/cleared on error paths (BUG-006)
+`delete(sess.Values, oauthStateName)` is applied to the in-memory session object but the session is never written back to the cookie on the provider-error, code-exchange-failed, and userinfo-failed return paths. The state token therefore remains in the cookie and can be replayed. Tracked as BUG-006.
+
+#### [WARNING] auth.go:303 — Provider-supplied error_description used as flash message (BUG-007)
+The `error_description` query parameter from the OAuth provider is set verbatim as the user-facing flash message. Current rendering is safe (html/template auto-escapes), but the content is fully attacker-controlled and the pattern is fragile. Tracked as BUG-007.
+
+#### [INFO] auth.go:102 — setSession does not rotate the session ID after login
+When a valid pre-login session exists (e.g. holding `return_to`), `setSession` reuses it and writes the `user_id` into it. This is the standard Gorilla sessions pattern for cookie-based sessions (the "session ID" is the HMAC-signed cookie value, which changes with each save), so this is not an exploitable vulnerability. Noted for awareness.
+
+#### [INFO] login.html — No CSRF meta tag in login page template
+`login.html` is a standalone template (not wrapped in `layout.html`) and does not include the CSRF meta tag. This is correct because the login page contains no state-changing forms (OAuth flows are GET redirects), but it means the HTMX `hx-headers` CSRF injection script is absent. This is fine as-is; no HTMX requests originate from the login page.
+
+---
+
 ### Implementation Summary (agent)
 
 All acceptance criteria met. Implemented on branch `feature/auth-task6-dashboard-auth` (commit cab0993).

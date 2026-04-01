@@ -127,3 +127,125 @@ Extract the summarization loop (lines 181-195) and the notification loop
 (lines 197-207) into separate helper methods like `summarizeNewJobs` and
 `notifyNewJobs`.
 
+---
+
+## BUG-005: TestProtectedRoutes_Unauthenticated tests stale route expectations
+
+**Severity:** Warning
+**File:** `internal/web/auth_test.go` (lines 681–721)
+**Related task:** auth-task6-dashboard-auth
+**Found by:** Code Reviewer agent
+
+### Description
+
+`TestProtectedRoutes_Unauthenticated` asserts that unauthenticated `GET /` and
+`GET /partials/job-table` return a `303 → /login` redirect. However,
+auth-task6 moved both routes from the `requireAuth` group to the `optionalAuth`
+group. Unauthenticated requests to `/` now return `200` with a hero section, and
+`/partials/job-table` returns `200` with an empty fragment. Both test cases will
+fail when the test suite is run.
+
+### Reproduction
+
+Run `npm test` (or `go test ./internal/web/...`). The sub-tests:
+- `GET / redirects to /login`
+- `GET /partials/job-table redirects to /login`
+will report `status = 200, want 303`.
+
+### Expected behavior
+
+Tests should reflect the new optionalAuth behavior:
+- `GET /` unauthenticated → `200 OK` (hero section)
+- `GET /partials/job-table` unauthenticated → `200 OK` (empty fragment)
+
+### Fix
+
+Remove `{http.MethodGet, "/"}` and `{http.MethodGet, "/partials/job-table"}`
+from the `routes` slice in `TestProtectedRoutes_Unauthenticated`. Add two new
+test cases (or extend `TestPublicRoutes_NoAuth`) asserting that each returns
+`200 OK` without a session cookie.
+
+---
+
+## BUG-006: OAuth state token not cleared from session on error paths
+
+**Severity:** Warning
+**File:** `internal/web/auth.go` (lines 297–318)
+**Related task:** auth-task2-login-polish / auth-task3-return-to
+**Found by:** Code Reviewer agent
+
+### Description
+
+In `handleOAuthCallback`, the oauth state is deleted from the in-memory session
+object on line 297 (`delete(sess.Values, oauthStateName)`), but the session is
+never saved back to the response cookie on any error path before `setSession` is
+called. The affected error paths are:
+
+1. Provider returned `error` query param (lines 300–308)
+2. Authorization code exchange failed (lines 313–318)
+3. Provider user-info fetch failed (lines 322–327)
+
+On these paths the session cookie still contains the `oauth_state` value. An
+attacker or a replayed request could reuse the same state parameter on a
+subsequent callback request.
+
+In practice exploitation requires the attacker to also hold the original session
+cookie, so the actual risk is low. But the intent of deleting the state is to
+prevent reuse and that intent is not honored on failure paths.
+
+### Reproduction
+
+1. Start an OAuth flow to store state in session.
+2. Hit `/auth/google/callback?state=<valid-state>&error=access_denied`.
+3. Observe the session cookie — the `oauth_state` value is still present.
+4. A second request to the callback with the same state will pass state validation.
+
+### Fix
+
+After `delete(sess.Values, oauthStateName)`, save the session to the response
+before any early return:
+
+```go
+delete(sess.Values, oauthStateName)
+sess.Options.Path = "/"
+_ = sess.Save(r, w) // consume the state token before any early return
+```
+
+---
+
+## BUG-007: error_description from OAuth provider used directly as flash message
+
+**Severity:** Warning
+**File:** `internal/web/auth.go` (lines 303–305)
+**Related task:** auth-task2-login-polish
+**Found by:** Code Reviewer agent
+
+### Description
+
+The `error_description` query parameter received from the OAuth provider in the
+callback URL is set verbatim as the flash message and then rendered in the login
+template. While Go's `html/template` auto-escapes the value before rendering,
+the content is still fully attacker-controlled (any party who controls the
+redirect URL could craft a misleading or phishing message).
+
+More importantly, if any future code path treats the flash message as trusted
+HTML (e.g. `template.HTML(msg)`), this becomes a direct XSS vector. The current
+code is safe, but the pattern is fragile.
+
+### Fix
+
+Do not use provider-supplied `error_description` as a user-facing message.
+Use the fixed string `"Sign-in was cancelled or denied. Please try again."` in
+all cases, and log the provider's description at the `Warn` level only (which
+is already done on line 302).
+
+```go
+if errMsg := r.URL.Query().Get("error"); errMsg != "" {
+    slog.Warn("oauth error from provider", "provider", providerName, "error", errMsg,
+        "description", r.URL.Query().Get("error_description"))
+    s.setFlash(w, r, "Sign-in was cancelled or denied. Please try again.")
+    http.Redirect(w, r, "/login", http.StatusSeeOther)
+    return
+}
+```
+
