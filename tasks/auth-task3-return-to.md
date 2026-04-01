@@ -1,7 +1,7 @@
 # Task: auth-task3-return-to
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Branch**: feature/auth-task3-return-to
 - **Source Item**: Full Sign-In / Sign-Up Flow
 - **Dependencies**: auth-task1-model, auth-task2-login-polish
@@ -25,7 +25,21 @@ Implement "return to" URL preservation so that users landing on a protected page
 
 ## Notes
 
-From the architecture plan:
+### Implementation Summary (completed 2026-04-01)
+
+- **Branch**: `feature/auth-task3-return-to`
+- **File changed**: `internal/web/auth.go` only (62 lines added, 10 changed)
+
+Changes made:
+1. Added `sessionReturnToKey = "return_to"` constant alongside existing session constants.
+2. `requireAuth` middleware saves `r.URL.RequestURI()` to session under `return_to` key before redirecting to `/login`. Only for GET requests; excludes `/login` and `/logout` paths to prevent redirect loops.
+3. New `consumeReturnTo(w, r) string` helper reads and clears `return_to` from session, validates it is same-origin (starts with `/`, does not start with `//`, does not contain `://`), returns `/` if invalid or empty.
+4. `handleOAuthCallback` success path uses `consumeReturnTo` instead of hardcoded `/`.
+5. `handleLogin` already-logged-in redirect uses `consumeReturnTo` instead of hardcoded `/`.
+
+All acceptance criteria met. Go toolchain not available in the sandbox so `go build` / `go vet` could not be run, but the implementation follows existing patterns exactly.
+
+### From the architecture plan:
 
 The same-origin guard must reject any value that contains a scheme (`://`) or starts with `//`. A simple validation:
 - Value must start with `/`
