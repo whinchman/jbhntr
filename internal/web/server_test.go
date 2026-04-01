@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -32,22 +34,28 @@ func newMockJobStore(jobs ...*models.Job) *mockJobStore {
 	return m
 }
 
-func (m *mockJobStore) GetJob(_ context.Context, _ int64, id int64) (*models.Job, error) {
+func (m *mockJobStore) GetJob(_ context.Context, userID int64, id int64) (*models.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j, ok := m.jobs[id]
 	if !ok {
 		return nil, fmt.Errorf("store: job %d not found", id)
 	}
+	if userID != 0 && j.UserID != userID {
+		return nil, fmt.Errorf("store: job %d not found", id)
+	}
 	cp := *j
 	return &cp, nil
 }
 
-func (m *mockJobStore) ListJobs(_ context.Context, _ int64, f store.ListJobsFilter) ([]models.Job, error) {
+func (m *mockJobStore) ListJobs(_ context.Context, userID int64, f store.ListJobsFilter) ([]models.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var result []models.Job
 	for _, j := range m.jobs {
+		if userID != 0 && j.UserID != userID {
+			continue
+		}
 		if f.Status != "" && j.Status != f.Status {
 			continue
 		}
@@ -56,11 +64,14 @@ func (m *mockJobStore) ListJobs(_ context.Context, _ int64, f store.ListJobsFilt
 	return result, nil
 }
 
-func (m *mockJobStore) UpdateJobStatus(_ context.Context, _ int64, id int64, newStatus models.JobStatus) error {
+func (m *mockJobStore) UpdateJobStatus(_ context.Context, userID int64, id int64, newStatus models.JobStatus) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j, ok := m.jobs[id]
 	if !ok {
+		return fmt.Errorf("store: job %d not found", id)
+	}
+	if userID != 0 && j.UserID != userID {
 		return fmt.Errorf("store: job %d not found", id)
 	}
 	j.Status = newStatus
@@ -137,6 +148,22 @@ func newServer(t *testing.T, jobs ...*models.Job) *httptest.Server {
 	ms := newMockJobStore(jobs...)
 	srv := web.NewServer(ms)
 	return httptest.NewServer(srv.Handler())
+}
+
+// extractCSRFToken finds the CSRF meta tag in an HTML body and returns the
+// unescaped token value.
+func extractCSRFToken(body string) string {
+	marker := `name="csrf-token" content="`
+	idx := strings.Index(body, marker)
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(marker)
+	end := strings.Index(body[start:], `"`)
+	if end < 0 {
+		return ""
+	}
+	return html.UnescapeString(body[start : start+end])
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -666,6 +693,358 @@ func TestRemoveFilter(t *testing.T) {
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+}
+
+// ─── adversarial / isolation tests ──────────────────────────────────────────
+
+func TestSettingsPage_EmptyState(t *testing.T) {
+	t.Run("settings page with no filters and empty resume returns 200", func(t *testing.T) {
+		ms := newMockJobStore()
+		fs := newMockFilterStore()
+		// No filters seeded, no resume set.
+		srv := web.NewServerWithConfig(ms, nil, fs, nil)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/settings")
+		if err != nil {
+			t.Fatalf("GET /settings: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+}
+
+func TestSaveResume_EmptyContent(t *testing.T) {
+	t.Run("saving empty resume string succeeds", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"resume": {""}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/resume", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/resume: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode/100 != 3 {
+			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
+		}
+
+		fs.mu.Lock()
+		got := fs.resumes[0]
+		fs.mu.Unlock()
+		if got != "" {
+			t.Errorf("resume content = %q, want empty string", got)
+		}
+	})
+}
+
+func TestRemoveFilter_WrongUser(t *testing.T) {
+	t.Run("removing filter belonging to another user returns 500", func(t *testing.T) {
+		ms := newMockJobStore()
+		fs := newMockFilterStore()
+
+		// Create a filter for user 42.
+		fs.CreateUserFilter(context.Background(), 42, &models.UserSearchFilter{
+			Keywords: "user42-only",
+		})
+
+		// Server runs without auth (nil user -> userID=0), so handler uses
+		// userID=0 which does not own filter ID 1.
+		srv := web.NewServerWithConfig(ms, nil, fs, nil)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?id=1", "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatalf("POST /settings/filters/remove: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// The handler should return 500 because the store returns "not found"
+		// for a filter that belongs to user 42 when accessed as user 0.
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Errorf("status = %d, want 500", resp.StatusCode)
+		}
+
+		// Verify the filter was NOT deleted.
+		fs.mu.Lock()
+		remaining := fs.filters[42]
+		fs.mu.Unlock()
+		if len(remaining) != 1 {
+			t.Errorf("filter should not have been deleted, got %d filters for user 42", len(remaining))
+		}
+	})
+}
+
+func TestJobDetail_UserIsolation(t *testing.T) {
+	t.Run("authenticated user cannot view another users job", func(t *testing.T) {
+		// Create a job belonging to user 99.
+		job := &models.Job{
+			ID:       10,
+			UserID:   99,
+			Title:    "Secret Job",
+			Company:  "Other Corp",
+			Location: "Hidden",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		// Try to access job 10 (belongs to user 99) as user 42.
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/jobs/10", nil)
+		req.AddCookie(cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /jobs/10: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (user isolation)", resp.StatusCode)
+		}
+	})
+
+	t.Run("authenticated user can view their own job", func(t *testing.T) {
+		job := &models.Job{
+			ID:       10,
+			UserID:   42,
+			Title:    "My Job",
+			Company:  "My Corp",
+			Location: "Remote",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/jobs/10", nil)
+		req.AddCookie(cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /jobs/10: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+}
+
+func TestAPIJobDetail_UserIsolation(t *testing.T) {
+	t.Run("authenticated user gets 404 for another users job via API", func(t *testing.T) {
+		job := &models.Job{
+			ID:       20,
+			UserID:   99,
+			Title:    "Secret API Job",
+			Company:  "Other Corp",
+			Location: "Hidden",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/jobs/20", nil)
+		req.AddCookie(cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /api/jobs/20: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (user isolation)", resp.StatusCode)
+		}
+	})
+}
+
+func TestDashboard_UserIsolation(t *testing.T) {
+	t.Run("dashboard only shows jobs belonging to authenticated user", func(t *testing.T) {
+		job1 := &models.Job{
+			ID:       1,
+			UserID:   42,
+			Title:    "My Job",
+			Company:  "My Corp",
+			Location: "Remote",
+			Status:   models.StatusDiscovered,
+		}
+		job2 := &models.Job{
+			ID:       2,
+			UserID:   99,
+			Title:    "Other Job",
+			Company:  "Other Corp",
+			Location: "Hidden",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job1, job2)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		client := ts.Client()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/jobs", nil)
+		req.AddCookie(cookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /api/jobs: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+
+		var jobs []models.Job
+		if err := json.NewDecoder(resp.Body).Decode(&jobs); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(jobs) != 1 {
+			t.Errorf("len(jobs) = %d, want 1 (only user 42's job)", len(jobs))
+		}
+		if len(jobs) == 1 && jobs[0].ID != 1 {
+			t.Errorf("job.ID = %d, want 1", jobs[0].ID)
+		}
+	})
+}
+
+func TestApproveJob_UserIsolation(t *testing.T) {
+	t.Run("cannot approve another users job", func(t *testing.T) {
+		job := &models.Job{
+			ID:       5,
+			UserID:   99,
+			Title:    "Other Users Job",
+			Company:  "Other Corp",
+			Status:   models.StatusDiscovered,
+		}
+		ms := newMockJobStore(job)
+		us := newMockUserStore(&models.User{
+			ID:          42,
+			Provider:    "google",
+			ProviderID:  "g-42",
+			Email:       "user42@example.com",
+			DisplayName: "User 42",
+		})
+
+		cfg := newAuthConfig()
+		srv := web.NewServerWithConfig(ms, us, nil, cfg)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		cookie := setSessionCookie(t, ts, 42)
+
+		// Need CSRF token for POST requests with auth enabled.
+		client := ts.Client()
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+
+		// GET the dashboard to get the CSRF cookie.
+		getReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+		getReq.AddCookie(cookie)
+		getResp, err := client.Do(getReq)
+		if err != nil {
+			t.Fatalf("GET /: %v", err)
+		}
+
+		var csrfCookie *http.Cookie
+		for _, c := range getResp.Cookies() {
+			if c.Name == "_gorilla_csrf" {
+				csrfCookie = c
+				break
+			}
+		}
+		bodyBytes, _ := io.ReadAll(getResp.Body)
+		getResp.Body.Close()
+
+		csrfToken := extractCSRFToken(string(bodyBytes))
+		if csrfToken == "" || csrfCookie == nil {
+			t.Fatal("could not extract CSRF token/cookie")
+		}
+
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/jobs/5/approve", nil)
+		req.AddCookie(cookie)
+		req.AddCookie(csrfCookie)
+		req.Header.Set("X-CSRF-Token", csrfToken)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST /api/jobs/5/approve: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (user isolation)", resp.StatusCode)
 		}
 	})
 }
