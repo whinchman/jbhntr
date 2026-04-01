@@ -12,7 +12,8 @@
      class="{{if eq $status $.ActiveStatus}}contrast{{else}}outline{{end}}"
      hx-get="/partials/job-table?status={{$status}}"
      hx-target="#job-table-body"
-     hx-swap="innerHTML">
+     hx-swap="innerHTML"
+     hx-push-url="true">
     {{$status}}
   </a>
   {{end}}
@@ -20,7 +21,8 @@
      class="{{if eq $.ActiveStatus ""}}contrast{{else}}outline{{end}}"
      hx-get="/partials/job-table"
      hx-target="#job-table-body"
-     hx-swap="innerHTML">
+     hx-swap="innerHTML"
+     hx-push-url="true">
     all
   </a>
 </div>
@@ -30,10 +32,12 @@
        hx-trigger="keyup changed delay:300ms"
        hx-target="#job-table-body"
        hx-swap="innerHTML"
+       hx-push-url="true"
        hx-include="[name='q']"
        value="{{.Search}}">
 
-<div hx-get="/partials/job-table?status={{.ActiveStatus}}&q={{.Search}}&sort={{.Sort}}&order={{.Order}}"
+<div hx-get="/partials/job-table"
+     hx-vals="js:{status: new URLSearchParams(location.search).get('status') || '', q: new URLSearchParams(location.search).get('q') || '', sort: new URLSearchParams(location.search).get('sort') || '', order: new URLSearchParams(location.search).get('order') || ''}"
      hx-trigger="every 30s"
      hx-target="#job-table-body"
      hx-swap="innerHTML">

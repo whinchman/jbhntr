@@ -30,6 +30,30 @@ Add `<input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">` ins
 
 ---
 
+## BUG-009: Status filter resets after Approve/Reject on dashboard
+
+**Severity:** Medium
+**File:** `internal/web/templates/dashboard.html`
+**Found by:** User
+
+### Description
+
+Clicking a status filter tab uses HTMX to swap `#job-table-body` without pushing
+a URL change. The polling div's `hx-get` URL is baked at server-render time
+(`status={{.ActiveStatus}}`), so it always points to the initially-loaded filter
+(empty = all). When Approve/Reject swaps a `<tr>` inside the polling div, HTMX
+resets the polling interval and it fires with the stale unfiltered URL, replacing
+`#job-table-body` with all jobs and discarding the active filter.
+
+### Fix
+
+1. Add `hx-push-url="true"` to each filter tab `<a>` so the URL stays in sync
+   with the active filter.
+2. Update the polling div to derive query params from the current URL at poll time
+   using `hx-vals="js:{...}"` instead of server-rendered static values.
+
+---
+
 ## ~~BUG-001: Legacy UNIQUE(external_id, source) prevents per-user job dedup~~ FIXED
 
 **Severity:** Medium
