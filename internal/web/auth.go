@@ -487,6 +487,20 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
+// optionalAuth is a Chi middleware that injects the authenticated user into
+// the request context if a valid session exists, but does not redirect or
+// return an error if the session is absent or invalid. This allows handlers
+// to serve different content for logged-in vs. logged-out visitors.
+func (s *Server) optionalAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, ok := s.getUserFromSession(r); ok {
+			ctx := context.WithValue(r.Context(), userContextKey, user)
+			r = r.WithContext(ctx)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // requireAuth is a Chi middleware that checks for a valid session. If the user
 // is not authenticated, it saves the current request URL in the session as
 // "return_to" (for GET requests only) and redirects to /login. If

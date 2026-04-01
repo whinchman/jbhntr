@@ -216,14 +216,21 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/auth/{provider}/callback", s.handleOAuthCallback)
 	}
 
+	// Optional-auth routes — serve different content for logged-in vs. logged-out users.
+	r.Group(func(r chi.Router) {
+		if s.sessionStore != nil {
+			r.Use(s.optionalAuth)
+		}
+
+		r.Get("/", s.handleDashboard)
+		r.Get("/partials/job-table", s.handleJobTablePartial)
+	})
+
 	// Protected routes — require authenticated session.
 	r.Group(func(r chi.Router) {
 		if s.sessionStore != nil {
 			r.Use(s.requireAuth)
 		}
-
-		r.Get("/", s.handleDashboard)
-		r.Get("/partials/job-table", s.handleJobTablePartial)
 
 		r.Get("/jobs/{id}", s.handleJobDetail)
 		r.Get("/output/{id}/resume.pdf", s.handleDownloadResume)
@@ -361,6 +368,13 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		// Unauthenticated: return an empty fragment so HTMX polling does not
+		// receive an error or trigger a redirect loop.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		return
+	}
 	q := r.URL.Query()
 	sort, order := parseSortParams(q)
 	f := store.ListJobsFilter{
@@ -369,12 +383,7 @@ func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
 		Sort:   sort,
 		Order:  order,
 	}
-	user := UserFromContext(r.Context())
-	var userID int64
-	if user != nil {
-		userID = user.ID
-	}
-	jobs, err := s.store.ListJobs(r.Context(), userID, f)
+	jobs, err := s.store.ListJobs(r.Context(), user.ID, f)
 	if err != nil {
 		http.Error(w, "failed to list jobs", http.StatusInternalServerError)
 		return
