@@ -33,10 +33,11 @@ func UserFromContext(ctx context.Context) *models.User {
 }
 
 const (
-	sessionName    = "jobhuntr_session"
-	sessionUserID  = "user_id"
-	sessionMaxAge  = 30 * 24 * 60 * 60 // 30 days in seconds
-	oauthStateName = "oauth_state"
+	sessionName     = "jobhuntr_session"
+	sessionUserID   = "user_id"
+	sessionMaxAge   = 30 * 24 * 60 * 60 // 30 days in seconds
+	oauthStateName  = "oauth_state"
+	sessionFlashKey = "flash"
 )
 
 // oauthProviders builds oauth2.Config for each enabled provider.
@@ -124,6 +125,43 @@ func (s *Server) clearSession(w http.ResponseWriter, r *http.Request) {
 	_ = sess.Save(r, w)
 }
 
+// setFlash stores a one-shot flash message in the session. The message is
+// consumed and cleared on the next call to consumeFlash.
+func (s *Server) setFlash(w http.ResponseWriter, r *http.Request, message string) {
+	sess, err := s.sessionStore.Get(r, sessionName)
+	if err != nil {
+		sess, _ = s.sessionStore.New(r, sessionName)
+	}
+	sess.Values[sessionFlashKey] = message
+	sess.Options.Path = "/"
+	if err := sess.Save(r, w); err != nil {
+		slog.Warn("setFlash: failed to save session", "error", err)
+	}
+}
+
+// consumeFlash reads and clears the flash message from the session (consume-once).
+// Returns "" if no flash is set.
+func (s *Server) consumeFlash(w http.ResponseWriter, r *http.Request) string {
+	if s.sessionStore == nil {
+		return ""
+	}
+	sess, err := s.sessionStore.Get(r, sessionName)
+	if err != nil {
+		return ""
+	}
+	raw, ok := sess.Values[sessionFlashKey]
+	if !ok {
+		return ""
+	}
+	msg, _ := raw.(string)
+	delete(sess.Values, sessionFlashKey)
+	sess.Options.Path = "/"
+	if err := sess.Save(r, w); err != nil {
+		slog.Warn("consumeFlash: failed to save session", "error", err)
+	}
+	return msg
+}
+
 // generateState returns a random base64-encoded string for OAuth state parameter.
 func generateState() (string, error) {
 	b := make([]byte, 32)
@@ -138,6 +176,8 @@ type loginData struct {
 	// Providers is the list of OAuth provider names that are configured and
 	// available for login (e.g. "google", "github").
 	Providers []string
+	// Flash is a one-shot error or info message to display. Empty means no alert.
+	Flash string
 }
 
 // handleLogin renders the login page with OAuth provider buttons.
@@ -155,8 +195,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		providers = append(providers, name)
 	}
 
+	// Consume any one-shot flash message (e.g. from a failed OAuth callback).
+	flash := s.consumeFlash(w, r)
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.loginTmpl.ExecuteTemplate(w, "login.html", loginData{Providers: providers}); err != nil {
+	if err := s.loginTmpl.ExecuteTemplate(w, "login.html", loginData{Providers: providers, Flash: flash}); err != nil {
 		slog.Error("login template render error", "error", err)
 	}
 }
@@ -207,12 +250,14 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	sess, err := s.sessionStore.Get(r, sessionName)
 	if err != nil {
 		slog.Warn("callback: invalid session", "error", err)
+		s.setFlash(w, r, "Sign-in session expired. Please try again.")
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	expectedState, _ := sess.Values[oauthStateName].(string)
 	if expectedState == "" || r.URL.Query().Get("state") != expectedState {
 		slog.Warn("callback: state mismatch")
+		s.setFlash(w, r, "Sign-in request was invalid or expired. Please try again.")
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -221,6 +266,11 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	// Check for error from provider (e.g. user denied consent).
 	if errMsg := r.URL.Query().Get("error"); errMsg != "" {
 		slog.Warn("oauth error from provider", "provider", providerName, "error", errMsg)
+		flashMsg := "Sign-in was cancelled or denied. Please try again."
+		if errDesc := r.URL.Query().Get("error_description"); errDesc != "" {
+			flashMsg = errDesc
+		}
+		s.setFlash(w, r, flashMsg)
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -230,6 +280,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	token, err := oauthCfg.Exchange(r.Context(), code)
 	if err != nil {
 		slog.Error("oauth code exchange failed", "provider", providerName, "error", err)
+		s.setFlash(w, r, "Sign-in failed: could not complete authentication. Please try again.")
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -238,6 +289,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	user, err := s.fetchProviderUser(r.Context(), providerName, oauthCfg, token)
 	if err != nil {
 		slog.Error("failed to fetch provider user info", "provider", providerName, "error", err)
+		s.setFlash(w, r, "Sign-in failed: could not retrieve your profile. Please try again.")
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
