@@ -404,3 +404,195 @@ func TestListJobs_UserIsolation(t *testing.T) {
 		}
 	})
 }
+
+// ─── Per-User Job Dedup ─────────────────────────────────────────────────────
+
+func TestCreateJob_PerUserDedup(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	u1, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "dedup-u1", Email: "d1@test.com"})
+	if err != nil {
+		t.Fatalf("UpsertUser u1 error = %v", err)
+	}
+
+	t.Run("same user same external_id+source is deduped", func(t *testing.T) {
+		j1 := sampleJob("dedup-ext", "serpapi")
+		j2 := sampleJob("dedup-ext", "serpapi")
+		ins1, _ := s.CreateJob(ctx, u1.ID, j1)
+		ins2, err := s.CreateJob(ctx, u1.ID, j2)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		if !ins1 {
+			t.Error("first insert should return true")
+		}
+		if ins2 {
+			t.Error("second insert for same user+ext+source should return false")
+		}
+	})
+
+	t.Run("legacy UNIQUE(external_id,source) blocks cross-user dedup", func(t *testing.T) {
+		// BUG-001: The old two-column UNIQUE constraint prevents two different
+		// users from having the same (external_id, source) pair.
+		u2, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "dedup-u2", Email: "d2@test.com"})
+		if err != nil {
+			t.Fatalf("UpsertUser u2 error = %v", err)
+		}
+
+		j3 := sampleJob("dedup-ext2", "serpapi")
+		ins1, _ := s.CreateJob(ctx, u1.ID, j3)
+		if !ins1 {
+			t.Fatal("first insert should succeed")
+		}
+
+		j4 := sampleJob("dedup-ext2", "serpapi")
+		ins2, err := s.CreateJob(ctx, u2.ID, j4)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		// This documents the known limitation. INSERT OR IGNORE silently
+		// ignores the insert due to the old UNIQUE(external_id, source) constraint.
+		if ins2 {
+			t.Log("per-user dedup works -- legacy constraint no longer blocking (BUG-001 may be fixed)")
+		} else {
+			t.Log("BUG-001 confirmed: legacy UNIQUE(external_id,source) blocks per-user dedup")
+		}
+	})
+}
+
+// ─── Cross-User GetJob Access ───────────────────────────────────────────────
+
+func TestGetJob_CrossUserAccess(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "cross-u1", Email: "cu1@test.com"})
+	u2, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "cross-u2", Email: "cu2@test.com"})
+
+	j := sampleJob("cross-get", "serpapi")
+	s.CreateJob(ctx, u1.ID, j)
+
+	t.Run("owner can read own job", func(t *testing.T) {
+		got, err := s.GetJob(ctx, u1.ID, j.ID)
+		if err != nil {
+			t.Fatalf("GetJob error = %v", err)
+		}
+		if got.ID != j.ID {
+			t.Errorf("ID = %d, want %d", got.ID, j.ID)
+		}
+	})
+
+	t.Run("other user cannot read job", func(t *testing.T) {
+		_, err := s.GetJob(ctx, u2.ID, j.ID)
+		if err == nil {
+			t.Error("GetJob should return error for cross-user access")
+		}
+	})
+
+	t.Run("userID 0 bypasses user scoping", func(t *testing.T) {
+		got, err := s.GetJob(ctx, 0, j.ID)
+		if err != nil {
+			t.Fatalf("GetJob(0) error = %v", err)
+		}
+		if got.ID != j.ID {
+			t.Errorf("ID = %d, want %d", got.ID, j.ID)
+		}
+	})
+}
+
+// ─── Cross-User UpdateJobStatus ─────────────────────────────────────────────
+
+func TestUpdateJobStatus_CrossUser(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "status-u1", Email: "su1@test.com"})
+	u2, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "status-u2", Email: "su2@test.com"})
+
+	j := sampleJob("cross-status", "serpapi")
+	s.CreateJob(ctx, u1.ID, j)
+
+	t.Run("other user cannot update job status", func(t *testing.T) {
+		err := s.UpdateJobStatus(ctx, u2.ID, j.ID, models.StatusNotified)
+		if err == nil {
+			t.Error("UpdateJobStatus should fail for cross-user access")
+		}
+	})
+
+	t.Run("owner can update own job status", func(t *testing.T) {
+		err := s.UpdateJobStatus(ctx, u1.ID, j.ID, models.StatusNotified)
+		if err != nil {
+			t.Fatalf("UpdateJobStatus error = %v", err)
+		}
+		got, _ := s.GetJob(ctx, u1.ID, j.ID)
+		if got.Status != models.StatusNotified {
+			t.Errorf("Status = %q, want notified", got.Status)
+		}
+	})
+}
+
+// ─── Job with nonexistent user_id ───────────────────────────────────────────
+
+func TestCreateJob_NonexistentUser(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	t.Run("insert succeeds with nonexistent user_id (no FK)", func(t *testing.T) {
+		j := sampleJob("no-fk", "serpapi")
+		inserted, err := s.CreateJob(ctx, 99999, j)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		if !inserted {
+			t.Error("expected insert to succeed")
+		}
+	})
+}
+
+// ─── Migration Idempotency with file-backed DB ─────────────────────────────
+
+func TestOpen_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := dir + "/test.db"
+
+	// First open: creates schema and runs migrations.
+	s1, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("first Open error = %v", err)
+	}
+
+	// Insert some data.
+	ctx := context.Background()
+	user := &models.User{Provider: "google", ProviderID: "idem-1", Email: "idem@test.com"}
+	user, err = s1.UpsertUser(ctx, user)
+	if err != nil {
+		t.Fatalf("UpsertUser error = %v", err)
+	}
+	j := sampleJob("idem-job", "serpapi")
+	s1.CreateJob(ctx, user.ID, j)
+	s1.Close()
+
+	// Second open: should succeed and data should survive.
+	s2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("second Open error = %v", err)
+	}
+	defer s2.Close()
+
+	got, err := s2.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUser after re-open error = %v", err)
+	}
+	if got.Email != "idem@test.com" {
+		t.Errorf("Email = %q, want idem@test.com", got.Email)
+	}
+
+	gotJob, err := s2.GetJob(ctx, user.ID, j.ID)
+	if err != nil {
+		t.Fatalf("GetJob after re-open error = %v", err)
+	}
+	if gotJob.ExternalID != "idem-job" {
+		t.Errorf("ExternalID = %q, want idem-job", gotJob.ExternalID)
+	}
+}

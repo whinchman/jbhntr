@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/whinchman/jobhuntr/internal/models"
 )
@@ -317,4 +318,102 @@ func TestDeleteUserFilter(t *testing.T) {
 			t.Error("DeleteUserFilter(wrong user) expected error, got nil")
 		}
 	})
+}
+
+// ─── Provider Uniqueness ───────────────────────────────────────────────────
+
+func TestUpsertUser_ProviderUniqueness(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	t.Run("same provider different ID creates separate users", func(t *testing.T) {
+		u1, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "prov-a", Email: "a@test.com"})
+		if err != nil {
+			t.Fatalf("UpsertUser u1 error = %v", err)
+		}
+		u2, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "prov-b", Email: "b@test.com"})
+		if err != nil {
+			t.Fatalf("UpsertUser u2 error = %v", err)
+		}
+		if u1.ID == u2.ID {
+			t.Error("same provider, different ID should create separate users")
+		}
+	})
+
+	t.Run("different provider same ID creates separate users", func(t *testing.T) {
+		u1, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "shared-id", Email: "g@test.com"})
+		if err != nil {
+			t.Fatalf("UpsertUser u1 error = %v", err)
+		}
+		u2, err := s.UpsertUser(ctx, &models.User{Provider: "github", ProviderID: "shared-id", Email: "gh@test.com"})
+		if err != nil {
+			t.Fatalf("UpsertUser u2 error = %v", err)
+		}
+		if u1.ID == u2.ID {
+			t.Error("different provider, same ID should create separate users")
+		}
+	})
+}
+
+// ─── ListUserFilters for nonexistent user ──────────────────────────────────
+
+func TestListUserFilters_NonexistentUser(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	filters, err := s.ListUserFilters(ctx, 99999)
+	if err != nil {
+		t.Fatalf("ListUserFilters error = %v", err)
+	}
+	if filters != nil && len(filters) != 0 {
+		t.Errorf("expected empty result for nonexistent user, got %d", len(filters))
+	}
+}
+
+// ─── DeleteUserFilter for nonexistent user+filter ──────────────────────────
+
+func TestDeleteUserFilter_NonexistentUser(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	err := s.DeleteUserFilter(ctx, 99999, 99999)
+	if err == nil {
+		t.Error("DeleteUserFilter for nonexistent user+filter should return error")
+	}
+}
+
+// ─── GetUser with negative ID ──────────────────────────────────────────────
+
+func TestGetUser_NegativeID(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	_, err := s.GetUser(ctx, -1)
+	if err == nil {
+		t.Error("GetUser(-1) expected error, got nil")
+	}
+}
+
+// ─── CreateUserFilter sets CreatedAt ────────────────────────────────────────
+
+func TestCreateUserFilter_SetsCreatedAt(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "ts-user", Email: "ts@test.com"})
+	filter := &models.UserSearchFilter{Keywords: "timestamp-test"}
+
+	before := time.Now().UTC().Add(-time.Second)
+	err := s.CreateUserFilter(ctx, user.ID, filter)
+	if err != nil {
+		t.Fatalf("CreateUserFilter error = %v", err)
+	}
+	after := time.Now().UTC().Add(time.Second)
+
+	if filter.CreatedAt.IsZero() {
+		t.Fatal("CreatedAt is zero")
+	}
+	if filter.CreatedAt.Before(before) || filter.CreatedAt.After(after) {
+		t.Errorf("CreatedAt = %v, want between %v and %v", filter.CreatedAt, before, after)
+	}
 }
