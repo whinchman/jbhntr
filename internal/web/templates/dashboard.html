@@ -3,6 +3,7 @@
 {{define "title"}}JobHuntr — Dashboard{{end}}
 
 {{define "content"}}
+{{if .User}}
 <h1>Job Listings</h1>
 
 <div class="tab-bar">
@@ -56,4 +57,15 @@
     </tbody>
   </table>
 </div>
+{{else}}
+<section style="text-align:center;padding:4rem 1rem;">
+  <h1>Track your job search, automatically.</h1>
+  <p style="max-width:40rem;margin:1rem auto;font-size:1.1rem;">
+    JobHuntr discovers relevant job listings and automatically generates
+    tailored resumes and cover letters — so you can focus on the
+    interviews, not the applications.
+  </p>
+  <a href="/login" role="button">Sign In to Get Started</a>
+</section>
+{{end}}
 {{end}}
