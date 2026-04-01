@@ -1,7 +1,7 @@
 # Task: auth-task2-login-polish
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Branch**: feature/auth-task2-login-polish
 - **Source Item**: Full Sign-In / Sign-Up Flow
 - **Dependencies**: none
@@ -22,6 +22,29 @@ Add session-based flash messages to the auth layer and polish the login page. Er
 - [ ] OAuth misconfiguration (bad client ID) redirects back with a flash message
 
 ## Notes
+
+### Completion (2026-04-01)
+
+Implemented on branch `feature/auth-task2-login-polish`.
+
+**Changes made:**
+
+- `internal/web/auth.go`:
+  - Added `sessionFlashKey = "flash"` constant
+  - Added `setFlash(w, r, message string)` — writes flash to gorilla session
+  - Added `consumeFlash(w, r) string` — reads, clears, and returns flash (consume-once); nil-safe for sessionStore
+  - Updated `loginData` struct: added `Flash string` field
+  - Updated `handleLogin`: calls `consumeFlash` and passes result into `loginData`
+  - Updated `handleOAuthCallback` error paths: all four error branches (invalid session, state mismatch, provider error, code-exchange failure, userinfo failure) now call `setFlash` with a readable human message before redirecting to `/login`. Provider `error_description` param is preferred over generic message for consent-denial errors.
+
+- `internal/web/templates/login.html`:
+  - Added `{{if .Flash}}` alert block (PicoCSS `role="alert"`) above provider buttons
+  - Added `onclick` handler to each provider `<a>` that sets `aria-busy="true"` — PicoCSS renders this as a native spinner
+  - Restructured layout with `<article>` + `<header>` for cleaner heading hierarchy and spacing
+
+Go toolchain not available in this container; `go build` and `go vet` could not be run. Code was reviewed manually for correctness.
+
+---
 
 From the architecture plan:
 
