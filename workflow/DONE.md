@@ -5,6 +5,18 @@ to the default branch.
 
 ---
 
+## Full Sign-In / Sign-Up Flow
+
+**Epic:** auth-signin-flow
+**Plan:** plans/auth-signin-flow.md
+**Completed:** 2026-04-01
+
+Polished login page with flash messages and loading states; first-time onboarding screen; profile/account page; return-to redirect after OAuth; dashboard auth-awareness (hero CTA for logged-out visitors, job table for authenticated users); layout nav with Sign In / Profile links. Code review findings (BUG-005/006/007) fixed inline.
+
+Tasks: auth-task1-model, auth-task2-login-polish, auth-task3-return-to, auth-task4-onboarding, auth-task5-profile, auth-task6-dashboard-auth (all done, merged to development)
+
+---
+
 ## OAuth Multi-User Authentication
 
 **Epic:** oauth-multi-user

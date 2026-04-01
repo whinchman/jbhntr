@@ -8,7 +8,7 @@ worktrees/
 config.yaml
 worktrees/*
 !worktrees/.gitkeep
-tasks/*
+tasks/*.log
 !tasks/.gitkeep
 .claude/projects/
 .DS_Store

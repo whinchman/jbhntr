@@ -129,7 +129,7 @@ Extract the summarization loop (lines 181-195) and the notification loop
 
 ---
 
-## BUG-005: TestProtectedRoutes_Unauthenticated tests stale route expectations
+## ~~BUG-005: TestProtectedRoutes_Unauthenticated tests stale route expectations~~ FIXED
 
 **Severity:** Warning
 **File:** `internal/web/auth_test.go` (lines 681–721)
@@ -167,7 +167,7 @@ test cases (or extend `TestPublicRoutes_NoAuth`) asserting that each returns
 
 ---
 
-## BUG-006: OAuth state token not cleared from session on error paths
+## ~~BUG-006: OAuth state token not cleared from session on error paths~~ FIXED
 
 **Severity:** Warning
 **File:** `internal/web/auth.go` (lines 297–318)
@@ -213,7 +213,7 @@ _ = sess.Save(r, w) // consume the state token before any early return
 
 ---
 
-## BUG-007: error_description from OAuth provider used directly as flash message
+## ~~BUG-007: error_description from OAuth provider used directly as flash message~~ FIXED
 
 **Severity:** Warning
 **File:** `internal/web/auth.go` (lines 303–305)
