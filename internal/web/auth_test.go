@@ -683,12 +683,10 @@ func TestProtectedRoutes_Unauthenticated(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/"},
 		{http.MethodGet, "/jobs/1"},
 		{http.MethodGet, "/settings"},
 		{http.MethodGet, "/api/jobs"},
 		{http.MethodGet, "/api/jobs/1"},
-		{http.MethodGet, "/partials/job-table"},
 	}
 
 	us := newMockUserStore()
@@ -715,6 +713,40 @@ func TestProtectedRoutes_Unauthenticated(t *testing.T) {
 			loc := resp.Header.Get("Location")
 			if loc != "/login" {
 				t.Errorf("Location = %q, want /login", loc)
+			}
+		})
+	}
+}
+
+func TestOptionalAuthRoutes_Unauthenticated(t *testing.T) {
+	routes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/"},
+		{http.MethodGet, "/partials/job-table"},
+	}
+
+	us := newMockUserStore()
+	ts := newAuthServer(t, us)
+	defer ts.Close()
+
+	client := ts.Client()
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	for _, rt := range routes {
+		t.Run(fmt.Sprintf("%s %s returns 200 when unauthenticated", rt.method, rt.path), func(t *testing.T) {
+			req, _ := http.NewRequest(rt.method, ts.URL+rt.path, nil)
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", rt.method, rt.path, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("status = %d, want %d (optionalAuth route should allow unauthenticated access)", resp.StatusCode, http.StatusOK)
 			}
 		})
 	}
