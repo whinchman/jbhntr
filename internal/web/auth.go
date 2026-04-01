@@ -33,11 +33,12 @@ func UserFromContext(ctx context.Context) *models.User {
 }
 
 const (
-	sessionName     = "jobhuntr_session"
-	sessionUserID   = "user_id"
-	sessionMaxAge   = 30 * 24 * 60 * 60 // 30 days in seconds
-	oauthStateName  = "oauth_state"
-	sessionFlashKey = "flash"
+	sessionName      = "jobhuntr_session"
+	sessionUserID    = "user_id"
+	sessionMaxAge    = 30 * 24 * 60 * 60 // 30 days in seconds
+	oauthStateName   = "oauth_state"
+	sessionFlashKey  = "flash"
+	sessionReturnToKey = "return_to"
 )
 
 // oauthProviders builds oauth2.Config for each enabled provider.
@@ -162,6 +163,38 @@ func (s *Server) consumeFlash(w http.ResponseWriter, r *http.Request) string {
 	return msg
 }
 
+// consumeReturnTo reads and clears the "return_to" URL from the session.
+// It validates that the stored value is a safe same-origin path: it must start
+// with "/" and must not start with "//" or contain "://" (which would indicate
+// an absolute URL and create an open-redirect vulnerability).
+// Returns "/" if no value is set or if validation fails.
+func (s *Server) consumeReturnTo(w http.ResponseWriter, r *http.Request) string {
+	if s.sessionStore == nil {
+		return "/"
+	}
+	sess, err := s.sessionStore.Get(r, sessionName)
+	if err != nil {
+		return "/"
+	}
+	raw, ok := sess.Values[sessionReturnToKey]
+	if !ok {
+		return "/"
+	}
+	dest, _ := raw.(string)
+	delete(sess.Values, sessionReturnToKey)
+	sess.Options.Path = "/"
+	if err := sess.Save(r, w); err != nil {
+		slog.Warn("consumeReturnTo: failed to save session", "error", err)
+	}
+
+	// Validate: must start with "/" and must not be a protocol-relative URL
+	// (starts with "//") or contain a URL scheme ("://").
+	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") || strings.Contains(dest, "://") {
+		return "/"
+	}
+	return dest
+}
+
 // generateState returns a random base64-encoded string for OAuth state parameter.
 func generateState() (string, error) {
 	b := make([]byte, 32)
@@ -182,9 +215,9 @@ type loginData struct {
 
 // handleLogin renders the login page with OAuth provider buttons.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	// If already logged in, redirect to dashboard.
+	// If already logged in, redirect to the stored return_to destination (or /).
 	if _, ok := s.getUserFromSession(r); ok {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		http.Redirect(w, r, s.consumeReturnTo(w, r), http.StatusSeeOther)
 		return
 	}
 
@@ -309,7 +342,10 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// Redirect to the originally-requested URL (stored before the /login
+	// redirect by requireAuth), falling back to "/" if none is set or if
+	// the stored value fails same-origin validation.
+	http.Redirect(w, r, s.consumeReturnTo(w, r), http.StatusSeeOther)
 }
 
 // fetchProviderUser calls the provider's user-info API and returns a
@@ -447,12 +483,28 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // requireAuth is a Chi middleware that checks for a valid session. If the user
-// is not authenticated, it redirects to /login. If authenticated, it injects
-// the *models.User into the request context.
+// is not authenticated, it saves the current request URL in the session as
+// "return_to" (for GET requests only) and redirects to /login. If
+// authenticated, it injects the *models.User into the request context.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := s.getUserFromSession(r)
 		if !ok {
+			// Only preserve the destination for GET requests — there is no
+			// sensible way to replay a POST after login.
+			if r.Method == http.MethodGet {
+				path := r.URL.Path
+				// Don't store the login or logout paths to avoid redirect loops.
+				if path != "/login" && path != "/logout" {
+					dest := r.URL.RequestURI()
+					sess, _ := s.sessionStore.Get(r, sessionName)
+					sess.Values[sessionReturnToKey] = dest
+					sess.Options.Path = "/"
+					if err := sess.Save(r, w); err != nil {
+						slog.Warn("requireAuth: failed to save return_to", "error", err)
+					}
+				}
+			}
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
