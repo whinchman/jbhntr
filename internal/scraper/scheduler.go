@@ -178,35 +178,51 @@ func (s *Scheduler) runFilter(ctx context.Context, userID int64, filter models.S
 		"duration", run.FinishedAt.Sub(started),
 	)
 
-	if s.summarizer != nil {
-		for i, job := range newJobs {
-			summary, salary, err := s.summarizer.Summarize(ctx, job)
-			if err != nil {
-				s.logger.Error("failed to summarize job", "job_id", job.ID, "error", err)
-				continue
-			}
-			if err := s.store.UpdateJobSummary(ctx, userID, job.ID, summary, salary); err != nil {
-				s.logger.Error("failed to save job summary", "job_id", job.ID, "error", err)
-				continue
-			}
-			newJobs[i].Summary = summary
-			newJobs[i].ExtractedSalary = salary
-		}
-	}
-
-	if s.notifier != nil {
-		for _, job := range newJobs {
-			if err := s.notifier.Notify(ctx, job); err != nil {
-				s.logger.Error("failed to send notification", "job_id", job.ID, "error", err)
-				continue
-			}
-			if err := s.store.UpdateJobStatus(ctx, userID, job.ID, models.StatusNotified); err != nil {
-				s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
-			}
-		}
-	}
+	newJobs = s.summarizeNewJobs(ctx, userID, newJobs)
+	s.notifyNewJobs(ctx, userID, newJobs)
 
 	return newJobs, nil
+}
+
+// summarizeNewJobs calls the Summarizer for each newly discovered job and
+// updates the summary and extracted salary in the store. The returned slice
+// is the same slice with Summary and ExtractedSalary fields populated where
+// summarization succeeded. If no Summarizer is configured it is a no-op.
+func (s *Scheduler) summarizeNewJobs(ctx context.Context, userID int64, newJobs []models.Job) []models.Job {
+	if s.summarizer == nil {
+		return newJobs
+	}
+	for i, job := range newJobs {
+		summary, salary, err := s.summarizer.Summarize(ctx, job)
+		if err != nil {
+			s.logger.Error("failed to summarize job", "job_id", job.ID, "error", err)
+			continue
+		}
+		if err := s.store.UpdateJobSummary(ctx, userID, job.ID, summary, salary); err != nil {
+			s.logger.Error("failed to save job summary", "job_id", job.ID, "error", err)
+			continue
+		}
+		newJobs[i].Summary = summary
+		newJobs[i].ExtractedSalary = salary
+	}
+	return newJobs
+}
+
+// notifyNewJobs sends a notification for each newly discovered job and marks
+// it as notified in the store. If no Notifier is configured it is a no-op.
+func (s *Scheduler) notifyNewJobs(ctx context.Context, userID int64, newJobs []models.Job) {
+	if s.notifier == nil {
+		return
+	}
+	for _, job := range newJobs {
+		if err := s.notifier.Notify(ctx, job); err != nil {
+			s.logger.Error("failed to send notification", "job_id", job.ID, "error", err)
+			continue
+		}
+		if err := s.store.UpdateJobStatus(ctx, userID, job.ID, models.StatusNotified); err != nil {
+			s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
+		}
+	}
 }
 
 // Start runs an initial scrape immediately, then repeats at each interval tick.
