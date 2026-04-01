@@ -1,7 +1,7 @@
 # Task: auth-task1-model
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Branch**: feature/auth-task1-model
 - **Source Item**: Full Sign-In / Sign-Up Flow
 - **Dependencies**: none
@@ -24,6 +24,17 @@ Add the `onboarding_complete` boolean column to the `users` table via a new migr
 - [ ] `UserStore` interface in `internal/web/server.go` declares both new methods
 
 ## Notes
+
+**Implemented on branch `feature/auth-task1-model` (commit 37e79c3)**
+
+Files changed:
+- `internal/store/migrations/005_add_onboarding_complete.sql` — new migration: ALTER TABLE + backfill UPDATE
+- `internal/models/user.go` — added `OnboardingComplete bool` field to `User` struct
+- `internal/store/user.go` — updated `scanUser`, `GetUser`, `GetUserByProvider` to include `onboarding_complete`; updated `UpsertUser` to explicitly set `onboarding_complete=0` on INSERT without including it in ON CONFLICT UPDATE; added `UpdateUserOnboarding` and `UpdateUserDisplayName` methods
+- `internal/web/server.go` — extended `UserStore` interface with `UpdateUserOnboarding` and `UpdateUserDisplayName`
+- `internal/web/auth_test.go` — updated `mockUserStore` to implement the two new interface methods
+
+Go compiler is not available in this container so `go build` could not be run, but the code was reviewed for correctness against the existing patterns.
 
 From the architecture plan:
 
