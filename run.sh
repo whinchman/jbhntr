@@ -16,9 +16,15 @@ BINARY="${SCRIPT_DIR}/bin/jobhuntr"
 # Check binary exists
 if [ ! -f "$BINARY" ]; then
   echo "Binary not found at $BINARY — building..."
-  cd "$SCRIPT_DIR"
-  go build -o bin/jobhuntr ./cmd/jobhuntr
+else
+  echo "Stale Binary found at $BINARY"
+  rm -rf "$BINARY" # Remove old binary to ensure we're using the latest code
+  echo "Rebuilding binary..."
 fi
+
+# Build the binary
+cd "$SCRIPT_DIR"
+go build -o bin/jobhuntr ./cmd/jobhuntr
 
 # Bootstrap config from example if missing
 if [ ! -f "$CONFIG" ]; then
