@@ -295,15 +295,17 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(sess.Values, oauthStateName)
+	// Always persist the session after deleting the state token so the
+	// CSRF state is cleared from the cookie regardless of the outcome below.
+	if err := sess.Save(r, w); err != nil {
+		slog.Warn("callback: failed to clear oauth state from session", "error", err)
+	}
 
 	// Check for error from provider (e.g. user denied consent).
 	if errMsg := r.URL.Query().Get("error"); errMsg != "" {
-		slog.Warn("oauth error from provider", "provider", providerName, "error", errMsg)
-		flashMsg := "Sign-in was cancelled or denied. Please try again."
-		if errDesc := r.URL.Query().Get("error_description"); errDesc != "" {
-			flashMsg = errDesc
-		}
-		s.setFlash(w, r, flashMsg)
+		errDesc := r.URL.Query().Get("error_description")
+		slog.Warn("oauth error from provider", "provider", providerName, "error", errMsg, "error_description", errDesc)
+		s.setFlash(w, r, "Sign-in was cancelled or denied. Please try again.")
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
