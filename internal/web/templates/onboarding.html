@@ -1,0 +1,48 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Welcome — JobHuntr{{end}}
+{{define "content"}}
+<article>
+  <header>
+    <h2>Welcome to JobHuntr!</h2>
+    <p>Just one quick step before you get started — tell us what to call you.</p>
+  </header>
+
+  {{if .Error}}
+  <div role="alert" style="color:var(--pico-color-red-500);margin-bottom:1rem;">
+    {{.Error}}
+  </div>
+  {{end}}
+
+  <form method="POST" action="/onboarding">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+
+    <label for="display_name">
+      Display Name <span aria-hidden="true" style="color:var(--pico-color-red-500)">*</span>
+      <input
+        type="text"
+        id="display_name"
+        name="display_name"
+        value="{{.DisplayName}}"
+        maxlength="100"
+        required
+        placeholder="Your name"
+        {{if .Error}}aria-invalid="true"{{end}}
+      >
+    </label>
+
+    <label for="resume">
+      Resume (optional)
+      <small>Paste your resume in Markdown or plain text. You can update this later in Settings.</small>
+      <textarea
+        id="resume"
+        name="resume"
+        rows="12"
+        placeholder="Paste your resume here (optional)…"
+      >{{.Resume}}</textarea>
+    </label>
+
+    <button type="submit">Get Started</button>
+  </form>
+</article>
+{{end}}
