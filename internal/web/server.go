@@ -92,6 +92,7 @@ type Server struct {
 	templates    *template.Template
 	detailTmpl   *template.Template
 	settingsTmpl *template.Template
+	profileTmpl  *template.Template
 	loginTmpl    *template.Template
 
 	startTime    time.Time
@@ -122,6 +123,10 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		"templates/layout.html",
 		"templates/settings.html",
 	))
+	profileTmpl := template.Must(template.ParseFS(templateFS,
+		"templates/layout.html",
+		"templates/profile.html",
+	))
 	loginTmpl := template.Must(template.ParseFS(templateFS, "templates/login.html"))
 
 	srv := &Server{
@@ -131,6 +136,7 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		templates:    tmpl,
 		detailTmpl:   detail,
 		settingsTmpl: settings,
+		profileTmpl:  profileTmpl,
 		loginTmpl:    loginTmpl,
 		startTime:    time.Now(),
 		cfg:          cfg,
@@ -221,6 +227,9 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/settings/resume", s.handleSaveResume)
 		r.Post("/settings/filters", s.handleAddFilter)
 		r.Post("/settings/filters/remove", s.handleRemoveFilter)
+
+		r.Get("/profile", s.handleProfileGet)
+		r.Post("/profile", s.handleProfileSave)
 
 		r.Post("/logout", s.handleLogout)
 
@@ -654,6 +663,73 @@ func (s *Server) handleRemoveFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+}
+
+// ─── profile handlers ─────────────────────────────────────────────────────────
+
+type profileData struct {
+	User      *models.User
+	CSRFToken string
+	Saved     bool
+	Error     string
+}
+
+func (s *Server) handleProfileGet(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	data := profileData{
+		User:      user,
+		CSRFToken: csrf.Token(r),
+		Saved:     r.URL.Query().Get("saved") == "1",
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.profileTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+		slog.Error("profile template render error", "error", err)
+	}
+}
+
+func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	user := UserFromContext(r.Context())
+	displayName := strings.TrimSpace(r.FormValue("display_name"))
+
+	if displayName == "" || len(displayName) > 100 {
+		errMsg := "Display name must be between 1 and 100 characters."
+		data := profileData{
+			User:      user,
+			CSRFToken: csrf.Token(r),
+			Error:     errMsg,
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		if err := s.profileTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+			slog.Error("profile template render error", "error", err)
+		}
+		return
+	}
+
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	if err := s.userStore.UpdateUserDisplayName(r.Context(), userID, displayName); err != nil {
+		slog.Error("failed to update display name", "error", err, "user_id", userID)
+		data := profileData{
+			User:      user,
+			CSRFToken: csrf.Token(r),
+			Error:     "Failed to save display name. Please try again.",
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := s.profileTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+			slog.Error("profile template render error", "error", err)
+		}
+		return
+	}
+
+	http.Redirect(w, r, "/profile?saved=1", http.StatusSeeOther)
 }
 
 // ─── detail / download handlers ───────────────────────────────────────────────
