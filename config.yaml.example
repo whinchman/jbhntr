@@ -2,17 +2,27 @@ server:
   port: 8080
   base_url: "http://localhost:8080"
 
+auth:
+  session_secret: "${SESSION_SECRET}"  # 32+ byte random key; generate with: openssl rand -base64 32
+  providers:
+    google:
+      client_id: "${GOOGLE_CLIENT_ID}"
+      client_secret: "${GOOGLE_CLIENT_SECRET}"
+    github:
+      client_id: "${GITHUB_CLIENT_ID}"
+      client_secret: "${GITHUB_CLIENT_SECRET}"
+
 scraper:
   interval: "1h"
   serpapi_key: "${SERPAPI_KEY}"
 
-search_filters:
-  - keywords: "senior software engineer golang"
-    location: "Remote"
-    min_salary: 150000
-  - keywords: "staff engineer go"
-    location: "Remote"
-    min_salary: 180000
+# DEPRECATED: search_filters is no longer used at runtime. Per-user search
+# filters are configured in the web UI (Settings page) and stored in the
+# database. This section is kept for reference only.
+# search_filters:
+#   - keywords: "senior software engineer golang"
+#     location: "Remote"
+#     min_salary: 150000
 
 ntfy:
   topic: "${NTFY_TOPIC}"
@@ -23,7 +33,7 @@ claude:
   model: "claude-sonnet-4-20250514"
 
 resume:
-  path: "./resume.md"
+  path: "./resume.md"  # Fallback resume; per-user resumes are stored in the database
 
 output:
   dir: "./output"

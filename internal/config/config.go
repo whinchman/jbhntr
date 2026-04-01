@@ -17,10 +17,16 @@ type Config struct {
 	Server        ServerConfig   `yaml:"server"`
 	Auth          AuthConfig     `yaml:"auth"`
 	Scraper       ScraperConfig  `yaml:"scraper"`
+	// SearchFilters holds global search filters parsed from the config file.
+	// Deprecated: per-user search filters are now stored in the database
+	// (user_search_filters table) and managed via the web UI. This field is
+	// retained for backward compatibility with config parsing tests.
 	SearchFilters []SearchFilter `yaml:"search_filters"`
 	Ntfy          NtfyConfig     `yaml:"ntfy"`
 	Claude        ClaudeConfig   `yaml:"claude"`
-	Resume        ResumeConfig   `yaml:"resume"`
+	// Resume is the fallback resume file for the generator worker. Per-user
+	// resumes are stored in the database (users.resume_markdown).
+	Resume ResumeConfig `yaml:"resume"`
 	Output        OutputConfig   `yaml:"output"`
 }
 

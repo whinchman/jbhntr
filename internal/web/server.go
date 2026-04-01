@@ -161,6 +161,16 @@ func (s *Server) WithLastScrapeFn(fn func() time.Time) *Server {
 	return s
 }
 
+// WithTestOAuthProvider replaces an OAuth provider's configuration.
+// Intended for integration tests that need to point OAuth endpoints at a
+// mock server.
+func (s *Server) WithTestOAuthProvider(name string, cfg *oauth2.Config) {
+	if s.oauthProviders == nil {
+		s.oauthProviders = make(map[string]*oauth2.Config)
+	}
+	s.oauthProviders[name] = cfg
+}
+
 // Handler builds and returns the chi router.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
