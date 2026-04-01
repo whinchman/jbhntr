@@ -29,6 +29,7 @@ func (s JobStatus) Valid() bool {
 // Job represents a single job listing stored in the database.
 type Job struct {
 	ID              int64
+	UserID          int64 // references users.id; 0 = legacy/unassigned
 	ExternalID      string
 	Source          string
 	Title           string

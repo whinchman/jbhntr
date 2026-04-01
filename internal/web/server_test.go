@@ -33,7 +33,7 @@ func newMockJobStore(jobs ...*models.Job) *mockJobStore {
 	return m
 }
 
-func (m *mockJobStore) GetJob(_ context.Context, id int64) (*models.Job, error) {
+func (m *mockJobStore) GetJob(_ context.Context, _ int64, id int64) (*models.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j, ok := m.jobs[id]
@@ -44,7 +44,7 @@ func (m *mockJobStore) GetJob(_ context.Context, id int64) (*models.Job, error) 
 	return &cp, nil
 }
 
-func (m *mockJobStore) ListJobs(_ context.Context, f store.ListJobsFilter) ([]models.Job, error) {
+func (m *mockJobStore) ListJobs(_ context.Context, _ int64, f store.ListJobsFilter) ([]models.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var result []models.Job
@@ -57,7 +57,7 @@ func (m *mockJobStore) ListJobs(_ context.Context, f store.ListJobsFilter) ([]mo
 	return result, nil
 }
 
-func (m *mockJobStore) UpdateJobStatus(_ context.Context, id int64, newStatus models.JobStatus) error {
+func (m *mockJobStore) UpdateJobStatus(_ context.Context, _ int64, id int64, newStatus models.JobStatus) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j, ok := m.jobs[id]

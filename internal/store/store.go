@@ -105,20 +105,21 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: enable foreign keys: %w", err)
 	}
 
+	// Apply baseline schema (idempotent: uses IF NOT EXISTS).
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("store: migrate schema: %w", err)
+		return nil, fmt.Errorf("store: apply baseline schema: %w", err)
 	}
 
-	// Add columns that may not exist in older databases.
-	for _, col := range []string{
-		"ALTER TABLE jobs ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
-		"ALTER TABLE jobs ADD COLUMN extracted_salary TEXT NOT NULL DEFAULT ''",
-	} {
-		db.Exec(col) // ignore "duplicate column" errors
+	s := &Store{db: db}
+
+	// Apply numbered migrations.
+	if err := s.Migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	return s, nil
 }
 
 // Close closes the underlying database connection.
@@ -126,15 +127,15 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// CreateJob inserts a job record, ignoring duplicates (UNIQUE external_id+source).
+// CreateJob inserts a job record, ignoring duplicates (UNIQUE user_id+external_id+source).
 // Returns inserted=true if a new row was created, false if it already existed.
-func (s *Store) CreateJob(ctx context.Context, job *models.Job) (bool, error) {
+func (s *Store) CreateJob(ctx context.Context, userID int64, job *models.Job) (bool, error) {
 	now := time.Now().UTC()
 	res, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO jobs
-		  (external_id, source, title, company, location, description, salary, apply_url, status, discovered_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.ExternalID, job.Source, job.Title, job.Company, job.Location,
+		  (user_id, external_id, source, title, company, location, description, salary, apply_url, status, discovered_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, job.ExternalID, job.Source, job.Title, job.Company, job.Location,
 		job.Description, job.Salary, job.ApplyURL, string(job.Status),
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
@@ -155,19 +156,28 @@ func (s *Store) CreateJob(ctx context.Context, job *models.Job) (bool, error) {
 		return true, fmt.Errorf("store: create job last id: %w", err)
 	}
 	job.ID = id
+	job.UserID = userID
 	job.DiscoveredAt = now
 	job.UpdatedAt = now
 	return true, nil
 }
 
-// GetJob retrieves a single job by its primary key.
-func (s *Store) GetJob(ctx context.Context, id int64) (*models.Job, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, external_id, source, title, company, location, description, salary, apply_url,
-		       status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg,
-		       discovered_at, updated_at
-		FROM jobs WHERE id = ?`, id)
+// GetJob retrieves a single job by its primary key. When userID is 0 the
+// query is not scoped by user (used by background workers). When userID > 0
+// the job must belong to that user.
+func (s *Store) GetJob(ctx context.Context, userID int64, id int64) (*models.Job, error) {
+	q := `SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url,
+	             status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg,
+	             discovered_at, updated_at
+	      FROM jobs WHERE id = ?`
+	args := []any{id}
 
+	if userID != 0 {
+		q += " AND user_id = ?"
+		args = append(args, userID)
+	}
+
+	row := s.db.QueryRowContext(ctx, q, args...)
 	job, err := scanJob(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -179,10 +189,16 @@ func (s *Store) GetJob(ctx context.Context, id int64) (*models.Job, error) {
 }
 
 // ListJobs returns jobs matching the given filter, ordered by discovered_at DESC.
-func (s *Store) ListJobs(ctx context.Context, f ListJobsFilter) ([]models.Job, error) {
+// When userID is 0 the query is not scoped by user (used by background workers).
+// When userID > 0 only that user's jobs are returned.
+func (s *Store) ListJobs(ctx context.Context, userID int64, f ListJobsFilter) ([]models.Job, error) {
 	var where []string
 	var args []any
 
+	if userID != 0 {
+		where = append(where, "user_id = ?")
+		args = append(args, userID)
+	}
 	if f.Status != "" {
 		where = append(where, "status = ?")
 		args = append(args, string(f.Status))
@@ -193,7 +209,7 @@ func (s *Store) ListJobs(ctx context.Context, f ListJobsFilter) ([]models.Job, e
 		args = append(args, like, like, like)
 	}
 
-	q := "SELECT id, external_id, source, title, company, location, description, salary, apply_url, status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg, discovered_at, updated_at FROM jobs"
+	q := "SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url, status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg, discovered_at, updated_at FROM jobs"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -231,8 +247,9 @@ func (s *Store) ListJobs(ctx context.Context, f ListJobsFilter) ([]models.Job, e
 }
 
 // UpdateJobStatus transitions a job to a new status, enforcing valid transitions.
-func (s *Store) UpdateJobStatus(ctx context.Context, id int64, newStatus models.JobStatus) error {
-	job, err := s.GetJob(ctx, id)
+// When userID is 0 the update is not scoped by user (worker path).
+func (s *Store) UpdateJobStatus(ctx context.Context, userID int64, id int64, newStatus models.JobStatus) error {
+	job, err := s.GetJob(ctx, userID, id)
 	if err != nil {
 		return err
 	}
@@ -249,10 +266,14 @@ func (s *Store) UpdateJobStatus(ctx context.Context, id int64, newStatus models.
 		return fmt.Errorf("store: invalid transition %s → %s", job.Status, newStatus)
 	}
 
-	_, err = s.db.ExecContext(ctx,
-		"UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?",
-		string(newStatus), time.Now().UTC().Format(time.RFC3339), id,
-	)
+	q := "UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?"
+	args := []any{string(newStatus), time.Now().UTC().Format(time.RFC3339), id}
+	if userID != 0 {
+		q += " AND user_id = ?"
+		args = append(args, userID)
+	}
+
+	_, err = s.db.ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("store: update job status: %w", err)
 	}
@@ -260,11 +281,15 @@ func (s *Store) UpdateJobStatus(ctx context.Context, id int64, newStatus models.
 }
 
 // UpdateJobSummary sets the AI-generated summary and extracted salary on a job.
-func (s *Store) UpdateJobSummary(ctx context.Context, id int64, summary, extractedSalary string) error {
-	_, err := s.db.ExecContext(ctx,
-		"UPDATE jobs SET summary = ?, extracted_salary = ?, updated_at = ? WHERE id = ?",
-		summary, extractedSalary, time.Now().UTC().Format(time.RFC3339), id,
-	)
+// When userID is 0 the update is not scoped by user (worker path).
+func (s *Store) UpdateJobSummary(ctx context.Context, userID int64, id int64, summary, extractedSalary string) error {
+	q := "UPDATE jobs SET summary = ?, extracted_salary = ?, updated_at = ? WHERE id = ?"
+	args := []any{summary, extractedSalary, time.Now().UTC().Format(time.RFC3339), id}
+	if userID != 0 {
+		q += " AND user_id = ?"
+		args = append(args, userID)
+	}
+	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("store: update job summary: %w", err)
 	}
@@ -272,11 +297,15 @@ func (s *Store) UpdateJobSummary(ctx context.Context, id int64, summary, extract
 }
 
 // UpdateJobError sets the error message and transitions a job to failed status.
-func (s *Store) UpdateJobError(ctx context.Context, id int64, errMsg string) error {
-	_, err := s.db.ExecContext(ctx,
-		"UPDATE jobs SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-		string(models.StatusFailed), errMsg, time.Now().UTC().Format(time.RFC3339), id,
-	)
+// When userID is 0 the update is not scoped by user (worker path).
+func (s *Store) UpdateJobError(ctx context.Context, userID int64, id int64, errMsg string) error {
+	q := "UPDATE jobs SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?"
+	args := []any{string(models.StatusFailed), errMsg, time.Now().UTC().Format(time.RFC3339), id}
+	if userID != 0 {
+		q += " AND user_id = ?"
+		args = append(args, userID)
+	}
+	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("store: update job error: %w", err)
 	}
@@ -284,13 +313,15 @@ func (s *Store) UpdateJobError(ctx context.Context, id int64, errMsg string) err
 }
 
 // UpdateJobGenerated sets the generated HTML and PDF paths on a job.
-func (s *Store) UpdateJobGenerated(ctx context.Context, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE jobs SET resume_html=?, cover_html=?, resume_pdf=?, cover_pdf=?, updated_at=?
-		WHERE id=?`,
-		resumeHTML, coverHTML, resumePDF, coverPDF,
-		time.Now().UTC().Format(time.RFC3339), id,
-	)
+// When userID is 0 the update is not scoped by user (worker path).
+func (s *Store) UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
+	q := "UPDATE jobs SET resume_html=?, cover_html=?, resume_pdf=?, cover_pdf=?, updated_at=? WHERE id=?"
+	args := []any{resumeHTML, coverHTML, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id}
+	if userID != 0 {
+		q += " AND user_id = ?"
+		args = append(args, userID)
+	}
+	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("store: update job generated: %w", err)
 	}
@@ -328,7 +359,7 @@ func scanJob(s scanner) (*models.Job, error) {
 	var discoveredAt, updatedAt string
 
 	err := s.Scan(
-		&job.ID, &job.ExternalID, &job.Source,
+		&job.ID, &job.UserID, &job.ExternalID, &job.Source,
 		&job.Title, &job.Company, &job.Location,
 		&job.Description, &job.Salary, &job.ApplyURL,
 		&status, &job.Summary, &job.ExtractedSalary,

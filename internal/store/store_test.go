@@ -41,7 +41,7 @@ func TestCreateJob(t *testing.T) {
 		s := openTestStore(t)
 		job := sampleJob("ext-1", "serpapi")
 
-		inserted, err := s.CreateJob(ctx, job)
+		inserted, err := s.CreateJob(ctx, 0, job)
 		if err != nil {
 			t.Fatalf("CreateJob error = %v", err)
 		}
@@ -58,8 +58,8 @@ func TestCreateJob(t *testing.T) {
 		job1 := sampleJob("ext-dup", "serpapi")
 		job2 := sampleJob("ext-dup", "serpapi")
 
-		inserted1, _ := s.CreateJob(ctx, job1)
-		inserted2, err := s.CreateJob(ctx, job2)
+		inserted1, _ := s.CreateJob(ctx, 0, job1)
+		inserted2, err := s.CreateJob(ctx, 0, job2)
 
 		if err != nil {
 			t.Fatalf("CreateJob (dup) error = %v", err)
@@ -77,8 +77,8 @@ func TestCreateJob(t *testing.T) {
 		j1 := sampleJob("ext-x", "serpapi")
 		j2 := sampleJob("ext-x", "linkedin")
 
-		i1, _ := s.CreateJob(ctx, j1)
-		i2, err := s.CreateJob(ctx, j2)
+		i1, _ := s.CreateJob(ctx, 0, j1)
+		i2, err := s.CreateJob(ctx, 0, j2)
 
 		if err != nil {
 			t.Fatalf("CreateJob error = %v", err)
@@ -97,9 +97,9 @@ func TestGetJob(t *testing.T) {
 	t.Run("returns inserted job", func(t *testing.T) {
 		s := openTestStore(t)
 		job := sampleJob("ext-get", "serpapi")
-		s.CreateJob(ctx, job)
+		s.CreateJob(ctx, 0, job)
 
-		got, err := s.GetJob(ctx, job.ID)
+		got, err := s.GetJob(ctx, 0, job.ID)
 		if err != nil {
 			t.Fatalf("GetJob error = %v", err)
 		}
@@ -116,7 +116,7 @@ func TestGetJob(t *testing.T) {
 
 	t.Run("returns error for unknown id", func(t *testing.T) {
 		s := openTestStore(t)
-		_, err := s.GetJob(ctx, 99999)
+		_, err := s.GetJob(ctx, 0, 99999)
 		if err == nil {
 			t.Error("GetJob(nonexistent) expected error, got nil")
 		}
@@ -136,14 +136,14 @@ func TestListJobs(t *testing.T) {
 			{ExternalID: "c", Source: "serpapi", Title: "Staff Engineer", Company: "Acme", Location: "Remote", Status: models.StatusApproved},
 		}
 		for _, j := range jobs {
-			s.CreateJob(ctx, j)
+			s.CreateJob(ctx, 0, j)
 		}
 		return s
 	}
 
 	t.Run("filter by status", func(t *testing.T) {
 		s := setup(t)
-		results, err := s.ListJobs(ctx, ListJobsFilter{Status: models.StatusDiscovered})
+		results, err := s.ListJobs(ctx, 0, ListJobsFilter{Status: models.StatusDiscovered})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -157,7 +157,7 @@ func TestListJobs(t *testing.T) {
 
 	t.Run("no filter returns all", func(t *testing.T) {
 		s := setup(t)
-		results, err := s.ListJobs(ctx, ListJobsFilter{})
+		results, err := s.ListJobs(ctx, 0, ListJobsFilter{})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -168,7 +168,7 @@ func TestListJobs(t *testing.T) {
 
 	t.Run("text search on title", func(t *testing.T) {
 		s := setup(t)
-		results, err := s.ListJobs(ctx, ListJobsFilter{Search: "Staff"})
+		results, err := s.ListJobs(ctx, 0, ListJobsFilter{Search: "Staff"})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -179,7 +179,7 @@ func TestListJobs(t *testing.T) {
 
 	t.Run("pagination limit", func(t *testing.T) {
 		s := setup(t)
-		results, err := s.ListJobs(ctx, ListJobsFilter{Limit: 2})
+		results, err := s.ListJobs(ctx, 0, ListJobsFilter{Limit: 2})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -190,8 +190,8 @@ func TestListJobs(t *testing.T) {
 
 	t.Run("pagination offset", func(t *testing.T) {
 		s := setup(t)
-		all, _ := s.ListJobs(ctx, ListJobsFilter{})
-		page2, err := s.ListJobs(ctx, ListJobsFilter{Limit: 2, Offset: 2})
+		all, _ := s.ListJobs(ctx, 0, ListJobsFilter{})
+		page2, err := s.ListJobs(ctx, 0, ListJobsFilter{Limit: 2, Offset: 2})
 		if err != nil {
 			t.Fatalf("ListJobs error = %v", err)
 		}
@@ -236,9 +236,9 @@ func TestUpdateJobStatus(t *testing.T) {
 				ExternalID: "trans-test", Source: "serpapi",
 				Title: "T", Company: "C", Location: "L", Status: tc.from,
 			}
-			s.CreateJob(ctx, job)
+			s.CreateJob(ctx, 0, job)
 
-			err := s.UpdateJobStatus(ctx, job.ID, tc.to)
+			err := s.UpdateJobStatus(ctx, 0, job.ID, tc.to)
 			if tc.ok && err != nil {
 				t.Errorf("UpdateJobStatus(%s→%s) unexpected error: %v", tc.from, tc.to, err)
 			}
@@ -257,14 +257,14 @@ func TestUpdateJobGenerated(t *testing.T) {
 	t.Run("sets generated fields", func(t *testing.T) {
 		s := openTestStore(t)
 		job := sampleJob("gen-test", "serpapi")
-		s.CreateJob(ctx, job)
+		s.CreateJob(ctx, 0, job)
 
-		err := s.UpdateJobGenerated(ctx, job.ID, "<h1>Resume</h1>", "<h1>Cover</h1>", "/out/resume.pdf", "/out/cover.pdf")
+		err := s.UpdateJobGenerated(ctx, 0, job.ID, "<h1>Resume</h1>", "<h1>Cover</h1>", "/out/resume.pdf", "/out/cover.pdf")
 		if err != nil {
 			t.Fatalf("UpdateJobGenerated error = %v", err)
 		}
 
-		got, _ := s.GetJob(ctx, job.ID)
+		got, _ := s.GetJob(ctx, 0, job.ID)
 		if got.ResumeHTML != "<h1>Resume</h1>" {
 			t.Errorf("ResumeHTML = %q", got.ResumeHTML)
 		}
@@ -307,6 +307,100 @@ func TestCreateScrapeRun(t *testing.T) {
 		}
 		if err := s.CreateScrapeRun(ctx, run); err != nil {
 			t.Fatalf("CreateScrapeRun error = %v", err)
+		}
+	})
+}
+
+// ─── CreateJob_WithUserID ────────────────────────────────────────────────────
+
+func TestCreateJob_WithUserID(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	// Create a user first.
+	user := &models.User{
+		Provider:   "google",
+		ProviderID: "user-1",
+		Email:      "test@example.com",
+	}
+	user, err := s.UpsertUser(ctx, user)
+	if err != nil {
+		t.Fatalf("UpsertUser error = %v", err)
+	}
+
+	job := sampleJob("ext-user", "serpapi")
+	inserted, err := s.CreateJob(ctx, user.ID, job)
+	if err != nil {
+		t.Fatalf("CreateJob error = %v", err)
+	}
+	if !inserted {
+		t.Error("CreateJob returned false, want true")
+	}
+
+	got, err := s.GetJob(ctx, user.ID, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob error = %v", err)
+	}
+	if got.UserID != user.ID {
+		t.Errorf("UserID = %d, want %d", got.UserID, user.ID)
+	}
+}
+
+// ─── ListJobs_UserIsolation ─────────────────────────────────────────────────
+
+func TestListJobs_UserIsolation(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	// Create two users.
+	u1, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "u1", Email: "u1@test.com"})
+	if err != nil {
+		t.Fatalf("UpsertUser u1 error = %v", err)
+	}
+	u2, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "u2", Email: "u2@test.com"})
+	if err != nil {
+		t.Fatalf("UpsertUser u2 error = %v", err)
+	}
+
+	// Create jobs for each user.
+	j1 := sampleJob("iso-1", "serpapi")
+	j2 := sampleJob("iso-2", "serpapi")
+	s.CreateJob(ctx, u1.ID, j1)
+	s.CreateJob(ctx, u2.ID, j2)
+
+	t.Run("user1 sees only own jobs", func(t *testing.T) {
+		jobs, err := s.ListJobs(ctx, u1.ID, ListJobsFilter{})
+		if err != nil {
+			t.Fatalf("ListJobs error = %v", err)
+		}
+		if len(jobs) != 1 {
+			t.Fatalf("len = %d, want 1", len(jobs))
+		}
+		if jobs[0].ExternalID != "iso-1" {
+			t.Errorf("ExternalID = %q, want iso-1", jobs[0].ExternalID)
+		}
+	})
+
+	t.Run("user2 sees only own jobs", func(t *testing.T) {
+		jobs, err := s.ListJobs(ctx, u2.ID, ListJobsFilter{})
+		if err != nil {
+			t.Fatalf("ListJobs error = %v", err)
+		}
+		if len(jobs) != 1 {
+			t.Fatalf("len = %d, want 1", len(jobs))
+		}
+		if jobs[0].ExternalID != "iso-2" {
+			t.Errorf("ExternalID = %q, want iso-2", jobs[0].ExternalID)
+		}
+	})
+
+	t.Run("userID 0 sees all jobs", func(t *testing.T) {
+		jobs, err := s.ListJobs(ctx, 0, ListJobsFilter{})
+		if err != nil {
+			t.Fatalf("ListJobs error = %v", err)
+		}
+		if len(jobs) != 2 {
+			t.Errorf("len = %d, want 2", len(jobs))
 		}
 	})
 }

@@ -48,7 +48,7 @@ func newMockStore() *mockStore {
 	return &mockStore{seen: make(map[string]bool)}
 }
 
-func (m *mockStore) CreateJob(_ context.Context, job *models.Job) (bool, error) {
+func (m *mockStore) CreateJob(_ context.Context, _ int64, job *models.Job) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := job.ExternalID + "|" + job.Source
@@ -69,11 +69,11 @@ func (m *mockStore) CreateScrapeRun(_ context.Context, run *store.ScrapeRun) err
 	return nil
 }
 
-func (m *mockStore) UpdateJobStatus(_ context.Context, _ int64, _ models.JobStatus) error {
+func (m *mockStore) UpdateJobStatus(_ context.Context, _ int64, _ int64, _ models.JobStatus) error {
 	return nil
 }
 
-func (m *mockStore) UpdateJobSummary(_ context.Context, _ int64, _, _ string) error {
+func (m *mockStore) UpdateJobSummary(_ context.Context, _ int64, _ int64, _, _ string) error {
 	return nil
 }
 

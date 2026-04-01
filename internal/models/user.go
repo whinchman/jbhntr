@@ -1,0 +1,29 @@
+package models
+
+import "time"
+
+// User represents an authenticated user.
+type User struct {
+	ID             int64
+	Provider       string // "google" or "github"
+	ProviderID     string // OAuth subject / user ID from the provider
+	Email          string
+	DisplayName    string
+	AvatarURL      string
+	ResumeMarkdown string
+	CreatedAt      time.Time
+	LastLoginAt    time.Time
+}
+
+// UserSearchFilter represents a per-user job search query configuration
+// stored in the database.
+type UserSearchFilter struct {
+	ID        int64
+	UserID    int64
+	Keywords  string
+	Location  string
+	MinSalary int
+	MaxSalary int
+	Title     string
+	CreatedAt time.Time
+}

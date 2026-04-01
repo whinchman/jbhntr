@@ -52,9 +52,9 @@ func slogRequestLogger(next http.Handler) http.Handler {
 
 // JobStore is the subset of store.Store used by the web server.
 type JobStore interface {
-	GetJob(ctx context.Context, id int64) (*models.Job, error)
-	ListJobs(ctx context.Context, f store.ListJobsFilter) ([]models.Job, error)
-	UpdateJobStatus(ctx context.Context, id int64, status models.JobStatus) error
+	GetJob(ctx context.Context, userID int64, id int64) (*models.Job, error)
+	ListJobs(ctx context.Context, userID int64, f store.ListJobsFilter) ([]models.Job, error)
+	UpdateJobStatus(ctx context.Context, userID int64, id int64, status models.JobStatus) error
 }
 
 // allStatuses lists job statuses shown as tabs in the dashboard.
@@ -224,7 +224,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Sort:   sort,
 		Order:  order,
 	}
-	jobs, err := s.store.ListJobs(r.Context(), f)
+	// TODO(task3): extract userID from session context
+	jobs, err := s.store.ListJobs(r.Context(), 0, f)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list jobs")
 		return
@@ -256,7 +257,8 @@ func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
 		Sort:   sort,
 		Order:  order,
 	}
-	jobs, err := s.store.ListJobs(r.Context(), f)
+	// TODO(task3): extract userID from session context
+	jobs, err := s.store.ListJobs(r.Context(), 0, f)
 	if err != nil {
 		http.Error(w, "failed to list jobs", http.StatusInternalServerError)
 		return
@@ -303,7 +305,8 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	jobs, err := s.store.ListJobs(r.Context(), f)
+	// TODO(task3): extract userID from session context
+	jobs, err := s.store.ListJobs(r.Context(), 0, f)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list jobs")
 		return
@@ -319,7 +322,8 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	job, err := s.store.GetJob(r.Context(), id)
+	// TODO(task3): extract userID from session context
+	job, err := s.store.GetJob(r.Context(), 0, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, "job not found")
@@ -337,7 +341,8 @@ func (s *Server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := s.store.GetJob(r.Context(), id)
+	// TODO(task3): extract userID from session context
+	job, err := s.store.GetJob(r.Context(), 0, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, "job not found")
@@ -352,7 +357,8 @@ func (s *Server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.UpdateJobStatus(r.Context(), id, models.StatusApproved); err != nil {
+	// TODO(task3): extract userID from session context
+	if err := s.store.UpdateJobStatus(r.Context(), 0, id, models.StatusApproved); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update job status")
 		return
 	}
@@ -366,7 +372,8 @@ func (s *Server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := s.store.GetJob(r.Context(), id)
+	// TODO(task3): extract userID from session context
+	job, err := s.store.GetJob(r.Context(), 0, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, "job not found")
@@ -376,7 +383,8 @@ func (s *Server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.UpdateJobStatus(r.Context(), id, models.StatusRejected); err != nil {
+	// TODO(task3): extract userID from session context
+	if err := s.store.UpdateJobStatus(r.Context(), 0, id, models.StatusRejected); err != nil {
 		if strings.Contains(err.Error(), "invalid transition") {
 			writeError(w, http.StatusConflict, "job cannot be rejected from status "+string(job.Status))
 			return
@@ -555,7 +563,8 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	job, err := s.store.GetJob(r.Context(), id)
+	// TODO(task3): extract userID from session context
+	job, err := s.store.GetJob(r.Context(), 0, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.NotFound(w, r)
@@ -580,7 +589,8 @@ func (s *Server) handleDownloadResume(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	job, err := s.store.GetJob(r.Context(), id)
+	// TODO(task3): extract userID from session context
+	job, err := s.store.GetJob(r.Context(), 0, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.NotFound(w, r)
@@ -602,7 +612,8 @@ func (s *Server) handleDownloadCover(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	job, err := s.store.GetJob(r.Context(), id)
+	// TODO(task3): extract userID from session context
+	job, err := s.store.GetJob(r.Context(), 0, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.NotFound(w, r)

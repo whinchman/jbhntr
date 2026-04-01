@@ -15,10 +15,10 @@ import (
 
 // StoreWriter is the subset of store.Store needed by the Scheduler.
 type StoreWriter interface {
-	CreateJob(ctx context.Context, job *models.Job) (bool, error)
+	CreateJob(ctx context.Context, userID int64, job *models.Job) (bool, error)
 	CreateScrapeRun(ctx context.Context, run *store.ScrapeRun) error
-	UpdateJobStatus(ctx context.Context, id int64, status models.JobStatus) error
-	UpdateJobSummary(ctx context.Context, id int64, summary, extractedSalary string) error
+	UpdateJobStatus(ctx context.Context, userID int64, id int64, status models.JobStatus) error
+	UpdateJobSummary(ctx context.Context, userID int64, id int64, summary, extractedSalary string) error
 }
 
 // Scheduler periodically searches all configured filters and persists new jobs.
@@ -117,7 +117,8 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 		if job.Status == "" {
 			job.Status = models.StatusDiscovered
 		}
-		inserted, err := s.store.CreateJob(ctx, job)
+		// TODO(task4): pass real userID from per-user filter iteration
+		inserted, err := s.store.CreateJob(ctx, 0, job)
 		if err != nil {
 			s.logger.Error("failed to store job", "error", err, "external_id", job.ExternalID)
 			continue
@@ -148,7 +149,8 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 				s.logger.Error("failed to summarize job", "job_id", job.ID, "error", err)
 				continue
 			}
-			if err := s.store.UpdateJobSummary(ctx, job.ID, summary, salary); err != nil {
+			// TODO(task4): pass real userID from per-user filter iteration
+			if err := s.store.UpdateJobSummary(ctx, 0, job.ID, summary, salary); err != nil {
 				s.logger.Error("failed to save job summary", "job_id", job.ID, "error", err)
 				continue
 			}
@@ -163,7 +165,8 @@ func (s *Scheduler) runFilter(ctx context.Context, filter models.SearchFilter) (
 				s.logger.Error("failed to send notification", "job_id", job.ID, "error", err)
 				continue
 			}
-			if err := s.store.UpdateJobStatus(ctx, job.ID, models.StatusNotified); err != nil {
+			// TODO(task4): pass real userID from per-user filter iteration
+			if err := s.store.UpdateJobStatus(ctx, 0, job.ID, models.StatusNotified); err != nil {
 				s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
 			}
 		}
