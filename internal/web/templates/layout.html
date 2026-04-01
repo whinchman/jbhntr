@@ -47,6 +47,8 @@
       &nbsp;·&nbsp;
       <a href="/settings">Settings</a>
       {{if .User}}
+      &nbsp;·&nbsp;
+      <a href="/profile">Profile</a>
       <span style="float:right;">
         {{if .User.AvatarURL}}
         <img src="{{.User.AvatarURL}}" alt="" style="width:24px;height:24px;border-radius:50%;vertical-align:middle;">
@@ -55,6 +57,8 @@
         &nbsp;·&nbsp;
         <a href="#" hx-post="/logout" hx-push-url="/login">Sign out</a>
       </span>
+      {{else}}
+      <span style="float:right;"><a href="/login">Sign in</a></span>
       {{end}}
     </nav>
     {{block "content" .}}{{end}}

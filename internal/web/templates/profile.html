@@ -1,0 +1,62 @@
+{{template "layout.html" .}}
+
+{{define "title"}}JobHuntr — Profile{{end}}
+
+{{define "content"}}
+<h1>Your Profile</h1>
+
+{{if .Saved}}
+<div role="alert" style="background:#e8f5e9;color:#2e7d32;padding:0.75rem 1rem;border-radius:0.3em;margin-bottom:1rem;">
+  Profile saved.
+</div>
+{{end}}
+
+{{if .Error}}
+<div role="alert" style="background:#ffebee;color:#b71c1c;padding:0.75rem 1rem;border-radius:0.3em;margin-bottom:1rem;">
+  {{.Error}}
+</div>
+{{end}}
+
+{{if .User}}
+<section>
+  <h2>Display Name</h2>
+  <form method="POST" action="/profile">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+    <div style="display:flex;gap:0.5rem;align-items:end;max-width:480px;">
+      <label style="flex:1;margin-bottom:0;">
+        Display name
+        <input type="text" name="display_name" value="{{.User.DisplayName}}" maxlength="100" required>
+      </label>
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</section>
+
+<hr>
+
+<section>
+  <h2>Connected Account</h2>
+  {{if .User.AvatarURL}}
+  <p>
+    <img src="{{.User.AvatarURL}}" alt="Avatar" style="width:48px;height:48px;border-radius:50%;vertical-align:middle;margin-right:0.5rem;">
+  </p>
+  {{end}}
+  <p>
+    <strong>Provider:</strong>
+    {{if eq .User.Provider "google"}}Google{{else if eq .User.Provider "github"}}GitHub{{else}}{{.User.Provider}}{{end}}
+  </p>
+  {{if .User.Email}}
+  <p><strong>Email:</strong> {{.User.Email}}</p>
+  {{end}}
+  <p><strong>Provider ID:</strong> <code>{{.User.ProviderID}}</code></p>
+</section>
+
+<hr>
+
+<section>
+  <h2>Sign Out</h2>
+  <p>Sign out of your account on this device.</p>
+  <button hx-post="/logout" hx-push-url="/login" class="secondary">Sign out</button>
+</section>
+{{end}}
+{{end}}
