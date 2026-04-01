@@ -134,8 +134,8 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		cfg:          cfg,
 	}
 
-	// Set up auth if session secret is configured.
-	if cfg != nil && cfg.Auth.SessionSecret != "" {
+	// Set up auth if session secret is configured and a user store is available.
+	if cfg != nil && cfg.Auth.SessionSecret != "" && us != nil {
 		sessStore := sessions.NewCookieStore([]byte(cfg.Auth.SessionSecret))
 		sessStore.Options = &sessions.Options{
 			Path:     "/",
@@ -191,10 +191,16 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	// Public routes — no auth required.
-	r.Get("/login", s.handleLogin)
-	r.Get("/auth/{provider}", s.handleOAuthStart)
-	r.Get("/auth/{provider}/callback", s.handleOAuthCallback)
 	r.Get("/health", s.handleHealth)
+	r.Get("/login", s.handleLogin)
+
+	// Auth routes are only registered when auth is configured.
+	// Registering them unconditionally would allow callers to hit handlers
+	// that dereference s.sessionStore/s.userStore/s.oauthProviders while nil.
+	if s.sessionStore != nil {
+		r.Get("/auth/{provider}", s.handleOAuthStart)
+		r.Get("/auth/{provider}/callback", s.handleOAuthCallback)
+	}
 
 	// Protected routes — require authenticated session.
 	r.Group(func(r chi.Router) {
@@ -523,6 +529,11 @@ type settingsData struct {
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if s.filterStore == nil {
+		slog.Error("filter store is not configured")
+		http.Error(w, "settings not available", http.StatusInternalServerError)
+		return
+	}
 	user := UserFromContext(r.Context())
 	var userID int64
 	if user != nil {
@@ -558,6 +569,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSaveResume(w http.ResponseWriter, r *http.Request) {
+	if s.filterStore == nil {
+		slog.Error("filter store is not configured")
+		http.Error(w, "settings not available", http.StatusInternalServerError)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -578,6 +594,11 @@ func (s *Server) handleSaveResume(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddFilter(w http.ResponseWriter, r *http.Request) {
+	if s.filterStore == nil {
+		slog.Error("filter store is not configured")
+		http.Error(w, "settings not available", http.StatusInternalServerError)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -609,6 +630,11 @@ func (s *Server) handleAddFilter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveFilter(w http.ResponseWriter, r *http.Request) {
+	if s.filterStore == nil {
+		slog.Error("filter store is not configured")
+		http.Error(w, "settings not available", http.StatusInternalServerError)
+		return
+	}
 	filterID, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid filter id", http.StatusBadRequest)

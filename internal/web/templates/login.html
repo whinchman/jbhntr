@@ -17,8 +17,17 @@
   <div class="login-card">
     <h1>JobHuntr</h1>
     <p>Sign in to manage your job search</p>
-    <a href="/auth/google" role="button" class="provider-btn">Sign in with Google</a>
-    <a href="/auth/github" role="button" class="provider-btn outline">Sign in with GitHub</a>
+    {{range .Providers}}
+      {{if eq . "google"}}
+        <a href="/auth/google" role="button" class="provider-btn">Sign in with Google</a>
+      {{end}}
+      {{if eq . "github"}}
+        <a href="/auth/github" role="button" class="provider-btn outline">Sign in with GitHub</a>
+      {{end}}
+    {{end}}
+    {{if eq (len .Providers) 0}}
+      <p><em>No OAuth providers are configured.</em></p>
+    {{end}}
   </div>
 </body>
 </html>

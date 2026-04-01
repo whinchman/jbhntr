@@ -133,6 +133,13 @@ func generateState() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
+// loginData is the template data for the login page.
+type loginData struct {
+	// Providers is the list of OAuth provider names that are configured and
+	// available for login (e.g. "google", "github").
+	Providers []string
+}
+
 // handleLogin renders the login page with OAuth provider buttons.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// If already logged in, redirect to dashboard.
@@ -141,8 +148,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Collect the names of configured OAuth providers so the template can
+	// render only the buttons that will actually work.
+	var providers []string
+	for name := range s.oauthProviders {
+		providers = append(providers, name)
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.loginTmpl.ExecuteTemplate(w, "login.html", nil); err != nil {
+	if err := s.loginTmpl.ExecuteTemplate(w, "login.html", loginData{Providers: providers}); err != nil {
 		slog.Error("login template render error", "error", err)
 	}
 }
@@ -345,6 +359,10 @@ func fetchGitHubPrimaryEmail(ctx context.Context, client *http.Client) (string, 
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("github emails: unexpected status %d", resp.StatusCode)
+	}
 
 	var emails []struct {
 		Email    string `json:"email"`

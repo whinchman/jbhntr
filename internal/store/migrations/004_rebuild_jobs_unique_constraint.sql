@@ -1,7 +1,11 @@
 -- Rebuild the jobs table without the legacy UNIQUE(external_id, source) constraint.
 -- The only uniqueness constraint will be idx_jobs_user_source_ext(user_id, external_id, source).
-
-PRAGMA foreign_keys = OFF;
+--
+-- Note: PRAGMA foreign_keys = OFF/ON is intentionally omitted here. SQLite
+-- ignores PRAGMA statements executed inside a transaction (which is how the
+-- migration runner applies each migration), so those statements would be
+-- no-ops. The table rebuild is safe without disabling FK enforcement because
+-- jobs.user_id carries no REFERENCES clause by design (see migration 003).
 
 CREATE TABLE jobs_new (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,5 +42,3 @@ CREATE INDEX IF NOT EXISTS idx_jobs_status       ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_discovered   ON jobs(discovered_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_user_id      ON jobs(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_user_source_ext ON jobs(user_id, external_id, source);
-
-PRAGMA foreign_keys = ON;
