@@ -43,6 +43,7 @@ func TestMigrate(t *testing.T) {
 			"001_create_users.sql",
 			"002_create_user_search_filters.sql",
 			"003_add_user_id_to_jobs.sql",
+			"004_rebuild_jobs_unique_constraint.sql",
 		}
 		if len(names) != len(expected) {
 			t.Fatalf("migrations applied = %d, want %d: %v", len(names), len(expected), names)

@@ -14,7 +14,6 @@ import (
 
 	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/generator"
-	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/notifier"
 	"github.com/whinchman/jobhuntr/internal/pdf"
 	"github.com/whinchman/jobhuntr/internal/scraper"
@@ -52,21 +51,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	filters := make([]models.SearchFilter, len(cfg.SearchFilters))
-	for i, f := range cfg.SearchFilters {
-		filters[i] = models.SearchFilter{
-			Keywords:  f.Keywords,
-			Location:  f.Location,
-			MinSalary: f.MinSalary,
-			MaxSalary: f.MaxSalary,
-			Title:     f.Title,
-		}
-	}
-
 	src := scraper.NewSerpAPISource(cfg.Scraper.SerpAPIKey)
 	ntfyNotifier := notifier.NewNtfyNotifier(cfg.Ntfy.Server, cfg.Ntfy.Topic, cfg.Server.BaseURL)
 	summarizer := generator.NewAnthropicSummarizer(cfg.Claude.APIKey, "")
-	sched := scraper.NewScheduler(src, db, filters, interval, logger).
+	sched := scraper.NewScheduler(src, db, db, interval, logger).
 		WithNotifier(ntfyNotifier).
 		WithSummarizer(summarizer)
 
@@ -111,7 +99,7 @@ func main() {
 	}()
 	go func() {
 		defer wg.Done()
-		slog.Info("starting scheduler", "interval", interval, "filters", len(filters))
+		slog.Info("starting scheduler", "interval", interval)
 		sched.Start(ctx)
 	}()
 

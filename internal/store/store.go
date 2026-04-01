@@ -61,8 +61,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     cover_pdf        TEXT    NOT NULL DEFAULT '',
     error_msg        TEXT    NOT NULL DEFAULT '',
     discovered_at    DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-    updated_at       DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-    UNIQUE(external_id, source)
+    updated_at       DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status       ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_discovered   ON jobs(discovered_at);

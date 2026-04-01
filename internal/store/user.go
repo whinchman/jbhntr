@@ -10,6 +10,30 @@ import (
 	"github.com/whinchman/jobhuntr/internal/models"
 )
 
+// ListActiveUserIDs returns the IDs of all users that have at least one
+// search filter configured. These are the users the scheduler should scrape
+// for.
+func (s *Store) ListActiveUserIDs(ctx context.Context) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT user_id
+		FROM user_search_filters
+		ORDER BY user_id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list active user IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: list active user IDs scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // UpsertUser inserts a new user or updates the last_login_at if the user
 // already exists (matched on provider + provider_id). It returns the user
 // with its database ID populated. The resume_markdown field is not

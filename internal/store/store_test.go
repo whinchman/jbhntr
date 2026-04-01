@@ -432,9 +432,9 @@ func TestCreateJob_PerUserDedup(t *testing.T) {
 		}
 	})
 
-	t.Run("legacy UNIQUE(external_id,source) blocks cross-user dedup", func(t *testing.T) {
-		// BUG-001: The old two-column UNIQUE constraint prevents two different
-		// users from having the same (external_id, source) pair.
+	t.Run("different users can have same external_id+source (BUG-001 fixed)", func(t *testing.T) {
+		// BUG-001 was fixed by migration 004 which removed the legacy
+		// UNIQUE(external_id, source) constraint. Per-user dedup now works.
 		u2, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "dedup-u2", Email: "d2@test.com"})
 		if err != nil {
 			t.Fatalf("UpsertUser u2 error = %v", err)
@@ -451,12 +451,8 @@ func TestCreateJob_PerUserDedup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateJob error = %v", err)
 		}
-		// This documents the known limitation. INSERT OR IGNORE silently
-		// ignores the insert due to the old UNIQUE(external_id, source) constraint.
-		if ins2 {
-			t.Log("per-user dedup works -- legacy constraint no longer blocking (BUG-001 may be fixed)")
-		} else {
-			t.Log("BUG-001 confirmed: legacy UNIQUE(external_id,source) blocks per-user dedup")
+		if !ins2 {
+			t.Error("second insert for different user should succeed (BUG-001 should be fixed)")
 		}
 	})
 }

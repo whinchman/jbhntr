@@ -8,6 +8,69 @@ import (
 	"github.com/whinchman/jobhuntr/internal/models"
 )
 
+// ─── ListActiveUserIDs ──────────────────────────────────────────────────────
+
+func TestListActiveUserIDs(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns distinct user IDs with filters", func(t *testing.T) {
+		s := openTestStore(t)
+		u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "active-1", Email: "a1@test.com"})
+		u2, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "active-2", Email: "a2@test.com"})
+
+		s.CreateUserFilter(ctx, u1.ID, &models.UserSearchFilter{Keywords: "golang"})
+		s.CreateUserFilter(ctx, u1.ID, &models.UserSearchFilter{Keywords: "rust"})
+		s.CreateUserFilter(ctx, u2.ID, &models.UserSearchFilter{Keywords: "python"})
+
+		ids, err := s.ListActiveUserIDs(ctx)
+		if err != nil {
+			t.Fatalf("ListActiveUserIDs error = %v", err)
+		}
+		if len(ids) != 2 {
+			t.Fatalf("len = %d, want 2", len(ids))
+		}
+		// IDs should be in ascending order.
+		if ids[0] != u1.ID || ids[1] != u2.ID {
+			t.Errorf("ids = %v, want [%d, %d]", ids, u1.ID, u2.ID)
+		}
+	})
+
+	t.Run("returns empty when no filters exist", func(t *testing.T) {
+		s := openTestStore(t)
+		// Create users but no filters.
+		s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "nofilt-1", Email: "nf1@test.com"})
+
+		ids, err := s.ListActiveUserIDs(ctx)
+		if err != nil {
+			t.Fatalf("ListActiveUserIDs error = %v", err)
+		}
+		if len(ids) != 0 {
+			t.Errorf("len = %d, want 0", len(ids))
+		}
+	})
+
+	t.Run("does not return users with no filters", func(t *testing.T) {
+		s := openTestStore(t)
+		u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "sel-1", Email: "s1@test.com"})
+		s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "sel-2", Email: "s2@test.com"}) // no filters
+		u3, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "sel-3", Email: "s3@test.com"})
+
+		s.CreateUserFilter(ctx, u1.ID, &models.UserSearchFilter{Keywords: "go"})
+		s.CreateUserFilter(ctx, u3.ID, &models.UserSearchFilter{Keywords: "java"})
+
+		ids, err := s.ListActiveUserIDs(ctx)
+		if err != nil {
+			t.Fatalf("ListActiveUserIDs error = %v", err)
+		}
+		if len(ids) != 2 {
+			t.Fatalf("len = %d, want 2", len(ids))
+		}
+		if ids[0] != u1.ID || ids[1] != u3.ID {
+			t.Errorf("ids = %v, want [%d, %d]", ids, u1.ID, u3.ID)
+		}
+	})
+}
+
 // ─── UpsertUser ──────────────────────────────────────────────────────────────
 
 func TestUpsertUser(t *testing.T) {

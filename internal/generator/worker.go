@@ -72,7 +72,7 @@ func (w *Worker) Start(ctx context.Context) {
 
 // processApproved queries for approved jobs and generates documents for each.
 func (w *Worker) processApproved(ctx context.Context) error {
-	// TODO(task3): pass real userID when worker is per-user scoped
+	// userID=0: worker processes jobs across all users (unscoped query).
 	jobs, err := w.store.ListJobs(ctx, 0, store.ListJobsFilter{Status: models.StatusApproved})
 	if err != nil {
 		return fmt.Errorf("worker: list approved jobs: %w", err)
@@ -87,7 +87,7 @@ func (w *Worker) processApproved(ctx context.Context) error {
 func (w *Worker) processJob(ctx context.Context, job models.Job) {
 	log := w.logger.With("job_id", job.ID, "title", job.Title)
 
-	// TODO(task3): pass real userID when worker is per-user scoped
+	// userID=0: worker processes jobs across all users (unscoped query).
 	if err := w.store.UpdateJobStatus(ctx, 0, job.ID, models.StatusGenerating); err != nil {
 		log.Error("failed to set status generating", "error", err)
 		return
@@ -126,12 +126,14 @@ func (w *Worker) processJob(ctx context.Context, job models.Job) {
 		return
 	}
 
+	// userID=0: worker processes jobs across all users (unscoped query).
 	if err := w.store.UpdateJobGenerated(ctx, 0, job.ID, resumeHTML, coverHTML, resumePDF, coverPDF); err != nil {
 		log.Error("failed to save generated paths", "error", err)
 		w.failJob(ctx, job.ID, err.Error())
 		return
 	}
 
+	// userID=0: worker processes jobs across all users (unscoped query).
 	if err := w.store.UpdateJobStatus(ctx, 0, job.ID, models.StatusComplete); err != nil {
 		log.Error("failed to set status complete", "error", err)
 		return
@@ -141,6 +143,7 @@ func (w *Worker) processJob(ctx context.Context, job models.Job) {
 }
 
 func (w *Worker) failJob(ctx context.Context, id int64, errMsg string) {
+	// userID=0: worker processes jobs across all users (unscoped query).
 	if err := w.store.UpdateJobError(ctx, 0, id, errMsg); err != nil {
 		w.logger.Error("failed to set job error", "job_id", id, "error", err)
 	}
