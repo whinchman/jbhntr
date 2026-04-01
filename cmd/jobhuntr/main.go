@@ -88,7 +88,7 @@ func main() {
 	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, cfg.Resume.Path, 30*time.Second, logger)
 
 	// Start HTTP server.
-	webSrv := web.NewServerWithConfig(db, cfg, *cfgPath, cfg.Resume.Path).
+	webSrv := web.NewServerWithConfig(db, db, cfg, *cfgPath, cfg.Resume.Path).
 		WithLastScrapeFn(sched.LastScrapeAt)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),

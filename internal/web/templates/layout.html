@@ -5,7 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{block "title" .}}JobHuntr{{end}}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  {{if .CSRFToken}}
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  {{end}}
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var meta = document.querySelector('meta[name="csrf-token"]');
+      if (meta) {
+        document.body.setAttribute('hx-headers',
+          JSON.stringify({"X-CSRF-Token": meta.content}));
+      }
+    });
+  </script>
   <style>
     .status-badge {
       display: inline-block;
@@ -34,6 +46,16 @@
       <a href="/">Jobs</a>
       &nbsp;·&nbsp;
       <a href="/settings">Settings</a>
+      {{if .User}}
+      <span style="float:right;">
+        {{if .User.AvatarURL}}
+        <img src="{{.User.AvatarURL}}" alt="" style="width:24px;height:24px;border-radius:50%;vertical-align:middle;">
+        {{end}}
+        {{.User.DisplayName}}
+        &nbsp;·&nbsp;
+        <a href="#" hx-post="/logout" hx-push-url="/login">Sign out</a>
+      </span>
+      {{end}}
     </nav>
     {{block "content" .}}{{end}}
   </main>

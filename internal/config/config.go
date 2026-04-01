@@ -15,12 +15,31 @@ import (
 // Config is the root configuration object.
 type Config struct {
 	Server        ServerConfig   `yaml:"server"`
+	Auth          AuthConfig     `yaml:"auth"`
 	Scraper       ScraperConfig  `yaml:"scraper"`
 	SearchFilters []SearchFilter `yaml:"search_filters"`
 	Ntfy          NtfyConfig     `yaml:"ntfy"`
 	Claude        ClaudeConfig   `yaml:"claude"`
 	Resume        ResumeConfig   `yaml:"resume"`
 	Output        OutputConfig   `yaml:"output"`
+}
+
+// AuthConfig holds OAuth and session configuration.
+type AuthConfig struct {
+	SessionSecret string          `yaml:"session_secret"`
+	Providers     ProvidersConfig `yaml:"providers"`
+}
+
+// ProvidersConfig holds per-provider OAuth credentials.
+type ProvidersConfig struct {
+	Google OAuthProviderConfig `yaml:"google"`
+	GitHub OAuthProviderConfig `yaml:"github"`
+}
+
+// OAuthProviderConfig holds OAuth client credentials for a single provider.
+type OAuthProviderConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
 }
 
 // ServerConfig holds HTTP server settings.

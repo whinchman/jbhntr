@@ -518,7 +518,7 @@ func newSettingsServer(t *testing.T) (*httptest.Server, string, string) {
 	}
 
 	ms := newMockJobStore()
-	srv := web.NewServerWithConfig(ms, cfg, cfgPath, resumePath)
+	srv := web.NewServerWithConfig(ms, nil, cfg, cfgPath, resumePath)
 	ts := httptest.NewServer(srv.Handler())
 	return ts, cfgPath, resumePath
 }

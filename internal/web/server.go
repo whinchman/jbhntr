@@ -18,6 +18,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/gorilla/csrf"
+	"github.com/gorilla/sessions"
+	"golang.org/x/oauth2"
 	"gopkg.in/yaml.v3"
 
 	"github.com/whinchman/jobhuntr/internal/config"
@@ -30,6 +33,8 @@ type jobDetailData struct {
 	Job        *models.Job
 	ResumeHTML template.HTML
 	CoverHTML  template.HTML
+	CSRFToken  string
+	User       *models.User
 }
 
 //go:embed templates
@@ -57,6 +62,12 @@ type JobStore interface {
 	UpdateJobStatus(ctx context.Context, userID int64, id int64, status models.JobStatus) error
 }
 
+// UserStore is the subset of store.Store used by the auth system.
+type UserStore interface {
+	GetUser(ctx context.Context, id int64) (*models.User, error)
+	UpsertUser(ctx context.Context, user *models.User) (*models.User, error)
+}
+
 // allStatuses lists job statuses shown as tabs in the dashboard.
 var allStatuses = []models.JobStatus{
 	models.StatusDiscovered, models.StatusNotified, models.StatusApproved,
@@ -65,10 +76,16 @@ var allStatuses = []models.JobStatus{
 
 // Server holds the HTTP dependencies.
 type Server struct {
-	store        JobStore
+	store          JobStore
+	userStore      UserStore
+	sessionStore   sessions.Store
+	oauthProviders map[string]*oauth2.Config
+	baseURL        string
+
 	templates    *template.Template
 	detailTmpl   *template.Template
 	settingsTmpl *template.Template
+	loginTmpl    *template.Template
 
 	startTime    time.Time
 	lastScrapeFn func() time.Time // optional; returns last scrape time
@@ -82,12 +99,12 @@ type Server struct {
 // NewServer constructs a Server and parses embedded templates.
 // cfg, configPath and resumePath may be zero/nil when settings are not needed.
 func NewServer(st JobStore) *Server {
-	return NewServerWithConfig(st, nil, "", "")
+	return NewServerWithConfig(st, nil, nil, "", "")
 }
 
-// NewServerWithConfig constructs a Server with config and file paths for the
-// settings page. Pass nil cfg or empty paths to disable settings persistence.
-func NewServerWithConfig(st JobStore, cfg *config.Config, configPath, resumePath string) *Server {
+// NewServerWithConfig constructs a Server with config, auth, and file paths.
+// Pass nil cfg, empty paths, or nil userStore to disable settings/auth.
+func NewServerWithConfig(st JobStore, us UserStore, cfg *config.Config, configPath, resumePath string) *Server {
 	tmpl := template.Must(template.ParseFS(templateFS,
 		"templates/layout.html",
 		"templates/dashboard.html",
@@ -101,16 +118,39 @@ func NewServerWithConfig(st JobStore, cfg *config.Config, configPath, resumePath
 		"templates/layout.html",
 		"templates/settings.html",
 	))
-	return &Server{
-		store:        st,
-		templates:    tmpl,
-		detailTmpl:   detail,
+	loginTmpl := template.Must(template.ParseFS(templateFS, "templates/login.html"))
+
+	srv := &Server{
+		store:      st,
+		userStore:  us,
+		templates:  tmpl,
+		detailTmpl: detail,
 		settingsTmpl: settings,
-		startTime:    time.Now(),
-		cfg:          cfg,
-		configPath:   configPath,
-		resumePath:   resumePath,
+		loginTmpl:  loginTmpl,
+		startTime:  time.Now(),
+		cfg:        cfg,
+		configPath: configPath,
+		resumePath: resumePath,
 	}
+
+	// Set up auth if session secret is configured.
+	if cfg != nil && cfg.Auth.SessionSecret != "" {
+		sessStore := sessions.NewCookieStore([]byte(cfg.Auth.SessionSecret))
+		sessStore.Options = &sessions.Options{
+			Path:     "/",
+			MaxAge:   sessionMaxAge,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   strings.HasPrefix(cfg.Server.BaseURL, "https"),
+		}
+		srv.sessionStore = sessStore
+		srv.oauthProviders = oauthProviders(cfg.Auth, cfg.Server.BaseURL)
+		srv.baseURL = cfg.Server.BaseURL
+	} else if cfg != nil {
+		srv.baseURL = cfg.Server.BaseURL
+	}
+
+	return srv
 }
 
 // WithLastScrapeFn sets a function the server calls to obtain the last scrape
@@ -126,24 +166,51 @@ func (s *Server) Handler() http.Handler {
 	r.Use(slogRequestLogger)
 	r.Use(chimw.Recoverer)
 
-	r.Get("/", s.handleDashboard)
-	r.Get("/partials/job-table", s.handleJobTablePartial)
+	// CSRF protection — only apply if auth is configured (allows tests
+	// without auth to skip it).
+	if s.sessionStore != nil {
+		csrfSecure := strings.HasPrefix(s.baseURL, "https")
+		csrfMiddleware := csrf.Protect(
+			[]byte(s.cfg.Auth.SessionSecret),
+			csrf.Secure(csrfSecure),
+			csrf.Path("/"),
+			csrf.SameSite(csrf.SameSiteLaxMode),
+		)
+		r.Use(csrfMiddleware)
+	}
+
+	// Public routes — no auth required.
+	r.Get("/login", s.handleLogin)
+	r.Get("/auth/{provider}", s.handleOAuthStart)
+	r.Get("/auth/{provider}/callback", s.handleOAuthCallback)
 	r.Get("/health", s.handleHealth)
 
-	r.Get("/jobs/{id}", s.handleJobDetail)
-	r.Get("/output/{id}/resume.pdf", s.handleDownloadResume)
-	r.Get("/output/{id}/cover_letter.pdf", s.handleDownloadCover)
+	// Protected routes — require authenticated session.
+	r.Group(func(r chi.Router) {
+		if s.sessionStore != nil {
+			r.Use(s.requireAuth)
+		}
 
-	r.Get("/settings", s.handleSettings)
-	r.Post("/settings/resume", s.handleSaveResume)
-	r.Post("/settings/filters", s.handleAddFilter)
-	r.Post("/settings/filters/remove", s.handleRemoveFilter)
+		r.Get("/", s.handleDashboard)
+		r.Get("/partials/job-table", s.handleJobTablePartial)
 
-	r.Route("/api/jobs", func(r chi.Router) {
-		r.Get("/", s.handleListJobs)
-		r.Get("/{id}", s.handleGetJob)
-		r.Post("/{id}/approve", s.handleApproveJob)
-		r.Post("/{id}/reject", s.handleRejectJob)
+		r.Get("/jobs/{id}", s.handleJobDetail)
+		r.Get("/output/{id}/resume.pdf", s.handleDownloadResume)
+		r.Get("/output/{id}/cover_letter.pdf", s.handleDownloadCover)
+
+		r.Get("/settings", s.handleSettings)
+		r.Post("/settings/resume", s.handleSaveResume)
+		r.Post("/settings/filters", s.handleAddFilter)
+		r.Post("/settings/filters/remove", s.handleRemoveFilter)
+
+		r.Post("/logout", s.handleLogout)
+
+		r.Route("/api/jobs", func(r chi.Router) {
+			r.Get("/", s.handleListJobs)
+			r.Get("/{id}", s.handleGetJob)
+			r.Post("/{id}/approve", s.handleApproveJob)
+			r.Post("/{id}/reject", s.handleRejectJob)
+		})
 	})
 
 	return r
@@ -201,6 +268,8 @@ type dashboardData struct {
 	Sort         string
 	Order        string
 	Columns      []columnDef
+	CSRFToken    string
+	User         *models.User
 }
 
 func parseSortParams(q url.Values) (string, string) {
@@ -241,6 +310,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Sort:         sort,
 		Order:        order,
 		Columns:      buildColumns(sort, order),
+		CSRFToken:    csrf.Token(r),
+		User:         UserFromContext(r.Context()),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -411,9 +482,11 @@ func (s *Server) respondJobAction(w http.ResponseWriter, r *http.Request, job *m
 // ─── settings handlers ────────────────────────────────────────────────────────
 
 type settingsData struct {
-	Filters []config.SearchFilter
-	Resume  string
-	Saved   bool
+	Filters   []config.SearchFilter
+	Resume    string
+	Saved     bool
+	CSRFToken string
+	User      *models.User
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -429,9 +502,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := settingsData{
-		Filters: filters,
-		Resume:  resume,
-		Saved:   r.URL.Query().Get("saved") == "1",
+		Filters:   filters,
+		Resume:    resume,
+		Saved:     r.URL.Query().Get("saved") == "1",
+		CSRFToken: csrf.Token(r),
+		User:      UserFromContext(r.Context()),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.settingsTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -577,6 +652,8 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request) {
 		Job:        job,
 		ResumeHTML: template.HTML(job.ResumeHTML), //nolint:gosec // HTML is generated by Claude, not user input
 		CoverHTML:  template.HTML(job.CoverHTML),  //nolint:gosec // HTML is generated by Claude, not user input
+		CSRFToken:  csrf.Token(r),
+		User:       UserFromContext(r.Context()),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.detailTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
