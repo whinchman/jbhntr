@@ -31,7 +31,7 @@
         <td>{{if $f.Location}}{{$f.Location}}{{else}}—{{end}}</td>
         <td>{{if $f.MinSalary}}${{$f.MinSalary}}{{else}}—{{end}}</td>
         <td>
-          <button hx-post="/settings/filters/remove?index={{$i}}"
+          <button hx-post="/settings/filters/remove?id={{$f.ID}}"
                   hx-target="body"
                   hx-push-url="true"
                   class="outline secondary"

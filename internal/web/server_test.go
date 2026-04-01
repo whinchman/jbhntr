@@ -12,7 +12,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/store"
 	"github.com/whinchman/jobhuntr/internal/web"
@@ -65,6 +64,59 @@ func (m *mockJobStore) UpdateJobStatus(_ context.Context, _ int64, id int64, new
 		return fmt.Errorf("store: job %d not found", id)
 	}
 	j.Status = newStatus
+	return nil
+}
+
+// ─── mock FilterStore ───────────────────────────────────────────────────────
+
+type mockFilterStore struct {
+	mu      sync.Mutex
+	filters map[int64][]models.UserSearchFilter
+	resumes map[int64]string
+	nextID  int64
+}
+
+func newMockFilterStore() *mockFilterStore {
+	return &mockFilterStore{
+		filters: make(map[int64][]models.UserSearchFilter),
+		resumes: make(map[int64]string),
+		nextID:  1,
+	}
+}
+
+func (m *mockFilterStore) CreateUserFilter(_ context.Context, userID int64, filter *models.UserSearchFilter) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	filter.ID = m.nextID
+	m.nextID++
+	filter.UserID = userID
+	m.filters[userID] = append(m.filters[userID], *filter)
+	return nil
+}
+
+func (m *mockFilterStore) ListUserFilters(_ context.Context, userID int64) ([]models.UserSearchFilter, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.filters[userID], nil
+}
+
+func (m *mockFilterStore) DeleteUserFilter(_ context.Context, userID int64, filterID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	filters := m.filters[userID]
+	for i, f := range filters {
+		if f.ID == filterID {
+			m.filters[userID] = append(filters[:i], filters[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("store: filter %d not found for user %d", filterID, userID)
+}
+
+func (m *mockFilterStore) UpdateUserResume(_ context.Context, userID int64, markdown string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resumes[userID] = markdown
 	return nil
 }
 
@@ -474,60 +526,30 @@ func TestDownloadCoverPDF(t *testing.T) {
 
 // ─── settings helpers ─────────────────────────────────────────────────────────
 
-// minimalConfigYAML is a complete but minimal config used in settings tests.
-const minimalConfigYAML = `server:
-  port: 8080
-  base_url: "http://localhost:8080"
-scraper:
-  interval: "1h"
-  serpapi_key: "test-key"
-search_filters:
-  - keywords: "golang engineer"
-    location: "Remote"
-    min_salary: 100000
-ntfy:
-  topic: "test"
-  server: "https://ntfy.sh"
-claude:
-  api_key: "test-claude"
-  model: "claude-sonnet-4-20250514"
-resume:
-  path: "./resume.md"
-output:
-  dir: "./output"
-`
-
-// newSettingsServer creates a test server wired with config + file paths.
-// It returns the test server, the config file path, and the resume file path.
-func newSettingsServer(t *testing.T) (*httptest.Server, string, string) {
+// newSettingsServer creates a test server wired with a mockFilterStore.
+// It returns the test server and the mock filter store for assertions.
+func newSettingsServer(t *testing.T) (*httptest.Server, *mockFilterStore) {
 	t.Helper()
-	dir := t.TempDir()
-
-	cfgPath := dir + "/config.yaml"
-	if err := os.WriteFile(cfgPath, []byte(minimalConfigYAML), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	resumePath := dir + "/resume.md"
-	if err := os.WriteFile(resumePath, []byte("# My Resume\n"), 0o644); err != nil {
-		t.Fatalf("write resume: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-
 	ms := newMockJobStore()
-	srv := web.NewServerWithConfig(ms, nil, cfg, cfgPath, resumePath)
+	fs := newMockFilterStore()
+
+	// Seed a filter so tests have data to work with.
+	fs.CreateUserFilter(context.Background(), 0, &models.UserSearchFilter{
+		Keywords:  "golang engineer",
+		Location:  "Remote",
+		MinSalary: 100000,
+	})
+
+	srv := web.NewServerWithConfig(ms, nil, fs, nil)
 	ts := httptest.NewServer(srv.Handler())
-	return ts, cfgPath, resumePath
+	return ts, fs
 }
 
 // ─── settings tests ──────────────────────────────────────────────────────────
 
 func TestSettingsPage(t *testing.T) {
 	t.Run("GET /settings returns 200 HTML", func(t *testing.T) {
-		ts, _, _ := newSettingsServer(t)
+		ts, _ := newSettingsServer(t)
 		defer ts.Close()
 
 		resp, err := ts.Client().Get(ts.URL + "/settings")
@@ -547,8 +569,8 @@ func TestSettingsPage(t *testing.T) {
 }
 
 func TestSaveResume(t *testing.T) {
-	t.Run("POST /settings/resume writes file and redirects", func(t *testing.T) {
-		ts, _, resumePath := newSettingsServer(t)
+	t.Run("POST /settings/resume saves to DB and redirects", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
 		defer ts.Close()
 
 		form := url.Values{"resume": {"# Updated Resume\n\nNew content."}}
@@ -563,19 +585,18 @@ func TestSaveResume(t *testing.T) {
 			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
 		}
 
-		got, err := os.ReadFile(resumePath)
-		if err != nil {
-			t.Fatalf("read resume: %v", err)
-		}
-		if string(got) != "# Updated Resume\n\nNew content." {
-			t.Errorf("resume content = %q, want updated content", string(got))
+		fs.mu.Lock()
+		got := fs.resumes[0]
+		fs.mu.Unlock()
+		if got != "# Updated Resume\n\nNew content." {
+			t.Errorf("resume content = %q, want updated content", got)
 		}
 	})
 }
 
 func TestAddFilter(t *testing.T) {
-	t.Run("POST /settings/filters adds filter and rewrites config", func(t *testing.T) {
-		ts, cfgPath, _ := newSettingsServer(t)
+	t.Run("POST /settings/filters adds filter to DB", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
 		defer ts.Close()
 
 		form := url.Values{
@@ -593,14 +614,13 @@ func TestAddFilter(t *testing.T) {
 			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
 		}
 
-		updated, err := config.Load(cfgPath)
-		if err != nil {
-			t.Fatalf("reload config: %v", err)
+		fs.mu.Lock()
+		filters := fs.filters[0]
+		fs.mu.Unlock()
+		if len(filters) != 2 {
+			t.Fatalf("len(filters) = %d, want 2", len(filters))
 		}
-		if len(updated.SearchFilters) != 2 {
-			t.Errorf("len(search_filters) = %d, want 2", len(updated.SearchFilters))
-		}
-		last := updated.SearchFilters[len(updated.SearchFilters)-1]
+		last := filters[len(filters)-1]
 		if last.Keywords != "senior go engineer" {
 			t.Errorf("last.Keywords = %q, want senior go engineer", last.Keywords)
 		}
@@ -611,11 +631,12 @@ func TestAddFilter(t *testing.T) {
 }
 
 func TestRemoveFilter(t *testing.T) {
-	t.Run("POST /settings/filters/remove?index=0 removes filter", func(t *testing.T) {
-		ts, cfgPath, _ := newSettingsServer(t)
+	t.Run("POST /settings/filters/remove?id=N removes filter from DB", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
 		defer ts.Close()
 
-		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?index=0", "application/x-www-form-urlencoded", nil)
+		// The seeded filter has ID 1.
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?id=1", "application/x-www-form-urlencoded", nil)
 		if err != nil {
 			t.Fatalf("POST /settings/filters/remove: %v", err)
 		}
@@ -625,20 +646,19 @@ func TestRemoveFilter(t *testing.T) {
 			t.Errorf("status = %d, want 2xx or 3xx", resp.StatusCode)
 		}
 
-		updated, err := config.Load(cfgPath)
-		if err != nil {
-			t.Fatalf("reload config: %v", err)
-		}
-		if len(updated.SearchFilters) != 0 {
-			t.Errorf("len(search_filters) = %d, want 0", len(updated.SearchFilters))
+		fs.mu.Lock()
+		filters := fs.filters[0]
+		fs.mu.Unlock()
+		if len(filters) != 0 {
+			t.Errorf("len(filters) = %d, want 0", len(filters))
 		}
 	})
 
-	t.Run("POST /settings/filters/remove with out-of-range index returns 400", func(t *testing.T) {
-		ts, _, _ := newSettingsServer(t)
+	t.Run("POST /settings/filters/remove with invalid id returns 400", func(t *testing.T) {
+		ts, _ := newSettingsServer(t)
 		defer ts.Close()
 
-		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?index=99", "application/x-www-form-urlencoded", nil)
+		resp, err := ts.Client().Post(ts.URL+"/settings/filters/remove?id=notanid", "application/x-www-form-urlencoded", nil)
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}

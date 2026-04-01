@@ -75,7 +75,7 @@ func newAuthServer(t *testing.T, us *mockUserStore) *httptest.Server {
 	t.Helper()
 	cfg := newAuthConfig()
 	ms := newMockJobStore()
-	srv := web.NewServerWithConfig(ms, us, cfg, "", "")
+	srv := web.NewServerWithConfig(ms, us, nil, cfg)
 	return httptest.NewServer(srv.Handler())
 }
 

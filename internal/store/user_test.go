@@ -320,6 +320,46 @@ func TestDeleteUserFilter(t *testing.T) {
 	})
 }
 
+// ─── UpdateUserResume ──────────────────────────────────────────────────────
+
+func TestUpdateUserResume(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("updates resume for existing user", func(t *testing.T) {
+		s := openTestStore(t)
+		user, err := s.UpsertUser(ctx, &models.User{
+			Provider:       "google",
+			ProviderID:     "resume-update",
+			Email:          "resume@example.com",
+			ResumeMarkdown: "# Old Resume",
+		})
+		if err != nil {
+			t.Fatalf("UpsertUser error = %v", err)
+		}
+
+		err = s.UpdateUserResume(ctx, user.ID, "# New Resume\n\nUpdated content.")
+		if err != nil {
+			t.Fatalf("UpdateUserResume error = %v", err)
+		}
+
+		got, err := s.GetUser(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetUser error = %v", err)
+		}
+		if got.ResumeMarkdown != "# New Resume\n\nUpdated content." {
+			t.Errorf("ResumeMarkdown = %q, want updated content", got.ResumeMarkdown)
+		}
+	})
+
+	t.Run("returns error for non-existent user", func(t *testing.T) {
+		s := openTestStore(t)
+		err := s.UpdateUserResume(ctx, 99999, "# Should Fail")
+		if err == nil {
+			t.Error("UpdateUserResume(nonexistent) expected error, got nil")
+		}
+	})
+}
+
 // ─── Provider Uniqueness ───────────────────────────────────────────────────
 
 func TestUpsertUser_ProviderUniqueness(t *testing.T) {

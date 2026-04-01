@@ -5,15 +5,12 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,7 +18,6 @@ import (
 	"github.com/gorilla/csrf"
 	"github.com/gorilla/sessions"
 	"golang.org/x/oauth2"
-	"gopkg.in/yaml.v3"
 
 	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/models"
@@ -68,6 +64,14 @@ type UserStore interface {
 	UpsertUser(ctx context.Context, user *models.User) (*models.User, error)
 }
 
+// FilterStore is the subset of store.Store used by the settings handlers.
+type FilterStore interface {
+	CreateUserFilter(ctx context.Context, userID int64, filter *models.UserSearchFilter) error
+	ListUserFilters(ctx context.Context, userID int64) ([]models.UserSearchFilter, error)
+	DeleteUserFilter(ctx context.Context, userID int64, filterID int64) error
+	UpdateUserResume(ctx context.Context, userID int64, markdown string) error
+}
+
 // allStatuses lists job statuses shown as tabs in the dashboard.
 var allStatuses = []models.JobStatus{
 	models.StatusDiscovered, models.StatusNotified, models.StatusApproved,
@@ -78,6 +82,7 @@ var allStatuses = []models.JobStatus{
 type Server struct {
 	store          JobStore
 	userStore      UserStore
+	filterStore    FilterStore
 	sessionStore   sessions.Store
 	oauthProviders map[string]*oauth2.Config
 	baseURL        string
@@ -90,21 +95,18 @@ type Server struct {
 	startTime    time.Time
 	lastScrapeFn func() time.Time // optional; returns last scrape time
 
-	mu         sync.Mutex // guards cfg, configPath, resumePath
-	cfg        *config.Config
-	configPath string
-	resumePath string
+	cfg *config.Config
 }
 
 // NewServer constructs a Server and parses embedded templates.
-// cfg, configPath and resumePath may be zero/nil when settings are not needed.
+// All optional dependencies (UserStore, FilterStore, Config) are set to nil.
 func NewServer(st JobStore) *Server {
-	return NewServerWithConfig(st, nil, nil, "", "")
+	return NewServerWithConfig(st, nil, nil, nil)
 }
 
-// NewServerWithConfig constructs a Server with config, auth, and file paths.
-// Pass nil cfg, empty paths, or nil userStore to disable settings/auth.
-func NewServerWithConfig(st JobStore, us UserStore, cfg *config.Config, configPath, resumePath string) *Server {
+// NewServerWithConfig constructs a Server with config, auth, and filter store.
+// Pass nil cfg or nil userStore/filterStore to disable settings/auth.
+func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.Config) *Server {
 	tmpl := template.Must(template.ParseFS(templateFS,
 		"templates/layout.html",
 		"templates/dashboard.html",
@@ -121,16 +123,15 @@ func NewServerWithConfig(st JobStore, us UserStore, cfg *config.Config, configPa
 	loginTmpl := template.Must(template.ParseFS(templateFS, "templates/login.html"))
 
 	srv := &Server{
-		store:      st,
-		userStore:  us,
-		templates:  tmpl,
-		detailTmpl: detail,
+		store:        st,
+		userStore:    us,
+		filterStore:  fs,
+		templates:    tmpl,
+		detailTmpl:   detail,
 		settingsTmpl: settings,
-		loginTmpl:  loginTmpl,
-		startTime:  time.Now(),
-		cfg:        cfg,
-		configPath: configPath,
-		resumePath: resumePath,
+		loginTmpl:    loginTmpl,
+		startTime:    time.Now(),
+		cfg:          cfg,
 	}
 
 	// Set up auth if session secret is configured.
@@ -293,8 +294,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Sort:   sort,
 		Order:  order,
 	}
-	// TODO(task3): extract userID from session context
-	jobs, err := s.store.ListJobs(r.Context(), 0, f)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	jobs, err := s.store.ListJobs(r.Context(), userID, f)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list jobs")
 		return
@@ -311,7 +316,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Order:        order,
 		Columns:      buildColumns(sort, order),
 		CSRFToken:    csrf.Token(r),
-		User:         UserFromContext(r.Context()),
+		User:         user,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -328,8 +333,12 @@ func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
 		Sort:   sort,
 		Order:  order,
 	}
-	// TODO(task3): extract userID from session context
-	jobs, err := s.store.ListJobs(r.Context(), 0, f)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	jobs, err := s.store.ListJobs(r.Context(), userID, f)
 	if err != nil {
 		http.Error(w, "failed to list jobs", http.StatusInternalServerError)
 		return
@@ -376,8 +385,12 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// TODO(task3): extract userID from session context
-	jobs, err := s.store.ListJobs(r.Context(), 0, f)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	jobs, err := s.store.ListJobs(r.Context(), userID, f)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list jobs")
 		return
@@ -393,8 +406,12 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// TODO(task3): extract userID from session context
-	job, err := s.store.GetJob(r.Context(), 0, id)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, "job not found")
@@ -412,8 +429,12 @@ func (s *Server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO(task3): extract userID from session context
-	job, err := s.store.GetJob(r.Context(), 0, id)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, "job not found")
@@ -428,8 +449,7 @@ func (s *Server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO(task3): extract userID from session context
-	if err := s.store.UpdateJobStatus(r.Context(), 0, id, models.StatusApproved); err != nil {
+	if err := s.store.UpdateJobStatus(r.Context(), userID, id, models.StatusApproved); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update job status")
 		return
 	}
@@ -443,8 +463,12 @@ func (s *Server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO(task3): extract userID from session context
-	job, err := s.store.GetJob(r.Context(), 0, id)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, "job not found")
@@ -454,8 +478,7 @@ func (s *Server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO(task3): extract userID from session context
-	if err := s.store.UpdateJobStatus(r.Context(), 0, id, models.StatusRejected); err != nil {
+	if err := s.store.UpdateJobStatus(r.Context(), userID, id, models.StatusRejected); err != nil {
 		if strings.Contains(err.Error(), "invalid transition") {
 			writeError(w, http.StatusConflict, "job cannot be rejected from status "+string(job.Status))
 			return
@@ -482,7 +505,7 @@ func (s *Server) respondJobAction(w http.ResponseWriter, r *http.Request, job *m
 // ─── settings handlers ────────────────────────────────────────────────────────
 
 type settingsData struct {
-	Filters   []config.SearchFilter
+	Filters   []models.UserSearchFilter
 	Resume    string
 	Saved     bool
 	CSRFToken string
@@ -490,15 +513,25 @@ type settingsData struct {
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	filters := s.filtersSnapshot()
-	s.mu.Unlock()
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+
+	filters, err := s.filterStore.ListUserFilters(r.Context(), userID)
+	if err != nil {
+		slog.Error("failed to list user filters", "error", err)
+		http.Error(w, "failed to load settings", http.StatusInternalServerError)
+		return
+	}
+	if filters == nil {
+		filters = []models.UserSearchFilter{}
+	}
 
 	resume := ""
-	if s.resumePath != "" {
-		if b, err := os.ReadFile(s.resumePath); err == nil {
-			resume = string(b)
-		}
+	if user != nil {
+		resume = user.ResumeMarkdown
 	}
 
 	data := settingsData{
@@ -506,7 +539,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		Resume:    resume,
 		Saved:     r.URL.Query().Get("saved") == "1",
 		CSRFToken: csrf.Token(r),
-		User:      UserFromContext(r.Context()),
+		User:      user,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.settingsTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -520,13 +553,14 @@ func (s *Server) handleSaveResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	content := r.FormValue("resume")
-
-	if s.resumePath == "" {
-		http.Error(w, "resume path not configured", http.StatusInternalServerError)
-		return
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
 	}
-	if err := os.WriteFile(s.resumePath, []byte(content), 0o644); err != nil {
-		slog.Error("failed to write resume", "error", err)
+
+	if err := s.filterStore.UpdateUserResume(r.Context(), userID, content); err != nil {
+		slog.Error("failed to save resume", "error", err, "user_id", userID)
 		http.Error(w, "failed to save resume", http.StatusInternalServerError)
 		return
 	}
@@ -538,27 +572,26 @@ func (s *Server) handleAddFilter(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+
 	minSalary := 0
 	if raw := r.FormValue("min_salary"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil {
 			minSalary = n
 		}
 	}
-	f := config.SearchFilter{
+	filter := &models.UserSearchFilter{
 		Keywords:  r.FormValue("keywords"),
 		Location:  r.FormValue("location"),
 		MinSalary: minSalary,
 	}
 
-	s.mu.Lock()
-	if s.cfg != nil {
-		s.cfg.SearchFilters = append(s.cfg.SearchFilters, f)
-	}
-	err := s.writeConfig()
-	s.mu.Unlock()
-
-	if err != nil {
-		slog.Error("failed to write config", "error", err)
+	if err := s.filterStore.CreateUserFilter(r.Context(), userID, filter); err != nil {
+		slog.Error("failed to create filter", "error", err, "user_id", userID)
 		http.Error(w, "failed to save filter", http.StatusInternalServerError)
 		return
 	}
@@ -566,69 +599,23 @@ func (s *Server) handleAddFilter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveFilter(w http.ResponseWriter, r *http.Request) {
-	idx, err := strconv.Atoi(r.URL.Query().Get("index"))
+	filterID, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 	if err != nil {
-		http.Error(w, "invalid index", http.StatusBadRequest)
+		http.Error(w, "invalid filter id", http.StatusBadRequest)
 		return
 	}
-
-	s.mu.Lock()
-	if s.cfg == nil || idx < 0 || idx >= len(s.cfg.SearchFilters) {
-		s.mu.Unlock()
-		http.Error(w, "index out of range", http.StatusBadRequest)
-		return
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
 	}
-	s.cfg.SearchFilters = append(s.cfg.SearchFilters[:idx], s.cfg.SearchFilters[idx+1:]...)
-	writeErr := s.writeConfig()
-	s.mu.Unlock()
 
-	if writeErr != nil {
-		slog.Error("failed to write config", "error", writeErr)
-		http.Error(w, "failed to save config", http.StatusInternalServerError)
+	if err := s.filterStore.DeleteUserFilter(r.Context(), userID, filterID); err != nil {
+		slog.Error("failed to delete filter", "error", err, "user_id", userID, "filter_id", filterID)
+		http.Error(w, "failed to remove filter", http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
-}
-
-// filtersSnapshot returns a copy of the current search filters. Caller must
-// hold s.mu.
-func (s *Server) filtersSnapshot() []config.SearchFilter {
-	if s.cfg == nil {
-		return nil
-	}
-	out := make([]config.SearchFilter, len(s.cfg.SearchFilters))
-	copy(out, s.cfg.SearchFilters)
-	return out
-}
-
-// writeConfig reads the existing config file, updates only the search_filters
-// section, and writes it back. This avoids overwriting env var placeholders
-// (like ${ANTHROPIC_API_KEY}) with expanded secret values.
-// Caller must hold s.mu.
-func (s *Server) writeConfig() error {
-	if s.cfg == nil || s.configPath == "" {
-		return nil
-	}
-
-	existing, err := os.ReadFile(s.configPath)
-	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-
-	// Parse the raw YAML into a generic map to preserve env var placeholders.
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(existing, &raw); err != nil {
-		return fmt.Errorf("parse config: %w", err)
-	}
-
-	// Only update the search_filters key with the in-memory values.
-	raw["search_filters"] = s.cfg.SearchFilters
-
-	data, err := yaml.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.configPath, data, 0o644)
 }
 
 // ─── detail / download handlers ───────────────────────────────────────────────
@@ -638,8 +625,12 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// TODO(task3): extract userID from session context
-	job, err := s.store.GetJob(r.Context(), 0, id)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.NotFound(w, r)
@@ -653,7 +644,7 @@ func (s *Server) handleJobDetail(w http.ResponseWriter, r *http.Request) {
 		ResumeHTML: template.HTML(job.ResumeHTML), //nolint:gosec // HTML is generated by Claude, not user input
 		CoverHTML:  template.HTML(job.CoverHTML),  //nolint:gosec // HTML is generated by Claude, not user input
 		CSRFToken:  csrf.Token(r),
-		User:       UserFromContext(r.Context()),
+		User:       user,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.detailTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -666,8 +657,12 @@ func (s *Server) handleDownloadResume(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// TODO(task3): extract userID from session context
-	job, err := s.store.GetJob(r.Context(), 0, id)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.NotFound(w, r)
@@ -689,8 +684,12 @@ func (s *Server) handleDownloadCover(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// TODO(task3): extract userID from session context
-	job, err := s.store.GetJob(r.Context(), 0, id)
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.NotFound(w, r)

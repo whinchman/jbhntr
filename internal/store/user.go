@@ -138,6 +138,25 @@ func (s *Store) DeleteUserFilter(ctx context.Context, userID int64, filterID int
 	return nil
 }
 
+// UpdateUserResume updates the resume_markdown column for the given user.
+func (s *Store) UpdateUserResume(ctx context.Context, userID int64, markdown string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE users SET resume_markdown = ? WHERE id = ?",
+		markdown, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update user resume: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: update user resume rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: user %d not found", userID)
+	}
+	return nil
+}
+
 // scanUser scans a single user row into a models.User.
 func scanUser(s scanner) (*models.User, error) {
 	var u models.User
