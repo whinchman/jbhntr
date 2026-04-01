@@ -11,4 +11,6 @@ items into tasks, then moves them to TODO.md.
 
 ## Features
 
+[ ] setup entire project for docker/container deployment
+[ ] create "EZ" deployment setups for Render/Railway
 
