@@ -559,8 +559,7 @@ type settingsData struct {
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if s.filterStore == nil {
-		slog.Error("filter store is not configured")
-		http.Error(w, "settings not available", http.StatusInternalServerError)
+		http.Error(w, "settings not configured", http.StatusServiceUnavailable)
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -599,8 +598,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSaveResume(w http.ResponseWriter, r *http.Request) {
 	if s.filterStore == nil {
-		slog.Error("filter store is not configured")
-		http.Error(w, "settings not available", http.StatusInternalServerError)
+		http.Error(w, "settings not configured", http.StatusServiceUnavailable)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -624,8 +622,7 @@ func (s *Server) handleSaveResume(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAddFilter(w http.ResponseWriter, r *http.Request) {
 	if s.filterStore == nil {
-		slog.Error("filter store is not configured")
-		http.Error(w, "settings not available", http.StatusInternalServerError)
+		http.Error(w, "settings not configured", http.StatusServiceUnavailable)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -660,8 +657,7 @@ func (s *Server) handleAddFilter(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRemoveFilter(w http.ResponseWriter, r *http.Request) {
 	if s.filterStore == nil {
-		slog.Error("filter store is not configured")
-		http.Error(w, "settings not available", http.StatusInternalServerError)
+		http.Error(w, "settings not configured", http.StatusServiceUnavailable)
 		return
 	}
 	filterID, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
