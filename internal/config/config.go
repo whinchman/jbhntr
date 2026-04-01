@@ -26,7 +26,7 @@ type Config struct {
 	Claude        ClaudeConfig   `yaml:"claude"`
 	// Resume is the fallback resume file for the generator worker. Per-user
 	// resumes are stored in the database (users.resume_markdown).
-	Resume ResumeConfig `yaml:"resume"`
+	Resume        ResumeConfig   `yaml:"resume"`
 	Output        OutputConfig   `yaml:"output"`
 }
 
