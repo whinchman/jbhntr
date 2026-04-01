@@ -77,3 +77,53 @@ if s.filterStore == nil {
 
 Or register settings routes conditionally (only when `filterStore != nil`).
 
+## BUG-003: Migration 004 PRAGMA foreign_keys is no-op inside transaction
+
+**Severity:** Low
+**File:** `internal/store/migrations/004_rebuild_jobs_unique_constraint.sql`, `internal/store/migrate.go`
+**Related task:** task4-multiuser-scraper
+**Found by:** Code Reviewer agent
+
+### Description
+
+Migration 004 includes `PRAGMA foreign_keys = OFF` at the start and
+`PRAGMA foreign_keys = ON` at the end. However, `migrate.go:runMigration`
+executes all migration SQL inside a database transaction (`tx.Exec`). SQLite
+ignores `PRAGMA foreign_keys` changes inside a transaction -- the pragma value
+is unchanged.
+
+This is currently harmless because no tables reference `jobs` via foreign keys,
+so `DROP TABLE jobs` succeeds regardless. But if a future migration adds FK
+references to the `jobs` table, a table-rebuild migration would fail unless the
+migrate runner is updated to handle PRAGMAs outside the transaction.
+
+### Impact
+
+None currently. The migration works correctly because no FKs reference `jobs`.
+
+### Fix options
+
+1. Remove the PRAGMAs from migration 004 (they do nothing) and add a comment
+   explaining why they are not needed.
+2. Or update `migrate.go:runMigration` to detect and execute PRAGMAs outside
+   the transaction boundary before beginning the migration transaction.
+
+## BUG-004: runFilter exceeds 50-line function guideline
+
+**Severity:** Low (code standard)
+**File:** `internal/scraper/scheduler.go` (lines 130-210)
+**Related task:** pre-existing (before task4)
+**Found by:** Code Reviewer agent
+
+### Description
+
+The `runFilter` method is 81 lines, exceeding the project code standard of
+"keep functions under 50 lines where practical." This was pre-existing
+(83 lines before task4) and not introduced by task4.
+
+### Fix
+
+Extract the summarization loop (lines 181-195) and the notification loop
+(lines 197-207) into separate helper methods like `summarizeNewJobs` and
+`notifyNewJobs`.
+

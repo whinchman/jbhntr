@@ -96,3 +96,55 @@ Implementation completed on branch `feature/task4-multiuser-scraper` (commit a0c
 - `RunOnce` no longer returns early on individual filter/user errors; it logs and continues
 - Scheduler reads filters from DB instead of config; `SearchFilters` config section unused by scheduler
 - Optional ScrapeRun user_id enhancement deferred (section 7 of design doc)
+
+## Review
+
+**Reviewer:** Code Reviewer agent
+**Verdict:** Approved (no blocking issues)
+**Date:** 2026-04-01
+
+### Summary
+
+Clean, well-structured implementation that matches the design doc closely.
+All acceptance criteria are met. `go build ./...` and `go test ./...` pass.
+No remaining `TODO(task3)` or `TODO(task4)` comments.
+
+### Checklist
+
+1. **Migration safety**: Migration 004 correctly rebuilds the `jobs` table
+   without the legacy `UNIQUE(external_id, source)` constraint. Column
+   mappings in the `INSERT INTO ... SELECT` match exactly. Data is preserved.
+   The `PRAGMA foreign_keys = OFF/ON` statements are no-ops inside the
+   transaction (confirmed via test), but this is harmless since no FKs
+   reference `jobs`. Filed as BUG-003 (low severity).
+
+2. **Scheduler correctness**: `RunOnce` correctly iterates all active users
+   via `ListActiveUserIDs`, fetches per-user filters, converts them, and
+   passes `userID` to all store calls. Error handling is per-user
+   (continue-on-error) -- one user's failure does not block others.
+
+3. **Deduplication**: Per-user dedup works correctly. The mock store keys on
+   `userID|externalID|source`, and the database enforces
+   `UNIQUE(user_id, external_id, source)` via the index. Same external job
+   can exist for different users (tested).
+
+4. **Worker**: `userID=0` is correct for the worker -- it processes all users'
+   jobs. The unscoped query pattern is already established in the store layer.
+   `TODO(task3)` comments replaced with clear explanatory comments.
+
+5. **Code standards**: Error wrapping with `fmt.Errorf("context: %w", err)`
+   throughout. Structured slog logging with `user_id` added to log lines.
+   Narrow `UserFilterReader` interface follows project conventions.
+   `runFilter` exceeds 50-line guideline (81 lines) but this is pre-existing
+   (83 lines before task4). Filed as BUG-004.
+
+6. **Test coverage**: 7 scheduler test cases covering: basic operation,
+   source error handling, empty state, ListActiveUserIDs failure, per-user
+   dedup, cross-user error isolation, and userID passthrough verification.
+   3 store tests for `ListActiveUserIDs`. BUG-001 store test updated to
+   assert the fix.
+
+### Out-of-scope bugs filed
+
+- **BUG-003**: Migration 004 PRAGMAs are no-ops inside transaction (low, harmless)
+- **BUG-004**: `runFilter` exceeds 50-line guideline (low, pre-existing)
