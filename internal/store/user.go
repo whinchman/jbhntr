@@ -36,14 +36,15 @@ func (s *Store) ListActiveUserIDs(ctx context.Context) ([]int64, error) {
 
 // UpsertUser inserts a new user or updates the last_login_at if the user
 // already exists (matched on provider + provider_id). It returns the user
-// with its database ID populated. The resume_markdown field is not
-// overwritten on conflict — login should not erase a user's resume.
+// with its database ID populated. The resume_markdown and onboarding_complete
+// fields are not overwritten on conflict — login should not erase a user's
+// resume or reset their onboarding status.
 func (s *Store) UpsertUser(ctx context.Context, user *models.User) (*models.User, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (provider, provider_id, email, display_name, avatar_url, resume_markdown, last_login_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO users (provider, provider_id, email, display_name, avatar_url, resume_markdown, onboarding_complete, last_login_at)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?)
 		ON CONFLICT(provider, provider_id) DO UPDATE SET
 			email = excluded.email,
 			display_name = excluded.display_name,
@@ -63,7 +64,7 @@ func (s *Store) UpsertUser(ctx context.Context, user *models.User) (*models.User
 func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, provider, provider_id, email, display_name, avatar_url,
-		       resume_markdown, created_at, last_login_at
+		       resume_markdown, onboarding_complete, created_at, last_login_at
 		FROM users WHERE id = ?`, id)
 
 	u, err := scanUser(row)
@@ -81,7 +82,7 @@ func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
 func (s *Store) GetUserByProvider(ctx context.Context, provider, providerID string) (*models.User, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, provider, provider_id, email, display_name, avatar_url,
-		       resume_markdown, created_at, last_login_at
+		       resume_markdown, onboarding_complete, created_at, last_login_at
 		FROM users WHERE provider = ? AND provider_id = ?`, provider, providerID)
 
 	u, err := scanUser(row)
@@ -181,18 +182,60 @@ func (s *Store) UpdateUserResume(ctx context.Context, userID int64, markdown str
 	return nil
 }
 
+// UpdateUserOnboarding sets the display_name, resume_markdown, and
+// onboarding_complete = 1 for the given user. This is called when the user
+// completes the onboarding flow.
+func (s *Store) UpdateUserOnboarding(ctx context.Context, userID int64, displayName string, resume string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE users SET display_name = ?, resume_markdown = ?, onboarding_complete = 1 WHERE id = ?",
+		displayName, resume, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update user onboarding: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: update user onboarding rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: user %d not found", userID)
+	}
+	return nil
+}
+
+// UpdateUserDisplayName updates the display_name column for the given user.
+func (s *Store) UpdateUserDisplayName(ctx context.Context, userID int64, displayName string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE users SET display_name = ? WHERE id = ?",
+		displayName, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update user display name: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: update user display name rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: user %d not found", userID)
+	}
+	return nil
+}
+
 // scanUser scans a single user row into a models.User.
 func scanUser(s scanner) (*models.User, error) {
 	var u models.User
 	var createdAt, lastLoginAt string
+	var onboardingComplete int
 	err := s.Scan(
 		&u.ID, &u.Provider, &u.ProviderID, &u.Email,
 		&u.DisplayName, &u.AvatarURL, &u.ResumeMarkdown,
-		&createdAt, &lastLoginAt,
+		&onboardingComplete, &createdAt, &lastLoginAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	u.OnboardingComplete = onboardingComplete != 0
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		u.CreatedAt = t
 	}
