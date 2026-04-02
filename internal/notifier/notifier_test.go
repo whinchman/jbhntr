@@ -29,16 +29,16 @@ func TestNtfyNotifier_Notify(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		n := NewNtfyNotifier(srv.URL, "test-topic", "http://localhost:8080")
+		n := NewNtfyNotifier(srv.URL, "http://localhost:8080")
 		job := models.Job{
-			ID:      42,
-			Title:   "Senior Go Engineer",
-			Company: "Acme Corp",
+			ID:       42,
+			Title:    "Senior Go Engineer",
+			Company:  "Acme Corp",
 			Location: "Remote",
-			Salary:  "$150k–$200k",
+			Salary:   "$150k–$200k",
 		}
 
-		if err := n.Notify(ctx, job); err != nil {
+		if err := n.Notify(ctx, job, "test-topic"); err != nil {
 			t.Fatalf("Notify() error = %v", err)
 		}
 
@@ -72,15 +72,32 @@ func TestNtfyNotifier_Notify(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		n := NewNtfyNotifier(srv.URL, "jobs", "http://app")
+		n := NewNtfyNotifier(srv.URL, "http://app")
 		job := models.Job{ID: 1, Title: "SRE", Company: "Foo", Location: "NYC"}
 
-		if err := n.Notify(ctx, job); err != nil {
+		if err := n.Notify(ctx, job, "jobs"); err != nil {
 			t.Fatalf("Notify() error = %v", err)
 		}
 
 		if strings.Contains(got.Message, "·") {
 			t.Errorf("message %q should not contain salary separator when salary is empty", got.Message)
+		}
+	})
+
+	t.Run("empty topic is a no-op", func(t *testing.T) {
+		called := false
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		n := NewNtfyNotifier(srv.URL, "http://app")
+		if err := n.Notify(ctx, models.Job{ID: 1, Title: "T", Company: "C"}, ""); err != nil {
+			t.Fatalf("Notify() error = %v", err)
+		}
+		if called {
+			t.Error("expected no HTTP request when topic is empty")
 		}
 	})
 
@@ -90,8 +107,8 @@ func TestNtfyNotifier_Notify(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		n := NewNtfyNotifier(srv.URL, "topic", "http://app")
-		err := n.Notify(ctx, models.Job{ID: 1, Title: "T", Company: "C"})
+		n := NewNtfyNotifier(srv.URL, "http://app")
+		err := n.Notify(ctx, models.Job{ID: 1, Title: "T", Company: "C"}, "topic")
 		if err == nil {
 			t.Error("expected error for non-2xx response")
 		}
@@ -105,8 +122,8 @@ func TestNtfyNotifier_Notify(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		n := NewNtfyNotifier(srv.URL, "my-jobs", "http://app")
-		n.Notify(ctx, models.Job{ID: 1, Title: "T", Company: "C"}) //nolint:errcheck
+		n := NewNtfyNotifier(srv.URL, "http://app")
+		n.Notify(ctx, models.Job{ID: 1, Title: "T", Company: "C"}, "my-jobs") //nolint:errcheck
 
 		if gotPath != "/my-jobs" {
 			t.Errorf("path = %q, want /my-jobs", gotPath)

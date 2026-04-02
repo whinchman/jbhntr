@@ -64,7 +64,7 @@ func (s *Store) UpsertUser(ctx context.Context, user *models.User) (*models.User
 func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, provider, provider_id, email, display_name, avatar_url,
-		       resume_markdown, onboarding_complete, created_at, last_login_at
+		       resume_markdown, onboarding_complete, ntfy_topic, created_at, last_login_at
 		FROM users WHERE id = $1`, id)
 
 	u, err := scanUser(row)
@@ -82,7 +82,7 @@ func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
 func (s *Store) GetUserByProvider(ctx context.Context, provider, providerID string) (*models.User, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, provider, provider_id, email, display_name, avatar_url,
-		       resume_markdown, onboarding_complete, created_at, last_login_at
+		       resume_markdown, onboarding_complete, ntfy_topic, created_at, last_login_at
 		FROM users WHERE provider = $1 AND provider_id = $2`, provider, providerID)
 
 	u, err := scanUser(row)
@@ -219,6 +219,25 @@ func (s *Store) UpdateUserDisplayName(ctx context.Context, userID int64, display
 	return nil
 }
 
+// UpdateUserNtfyTopic updates the ntfy_topic column for the given user.
+func (s *Store) UpdateUserNtfyTopic(ctx context.Context, userID int64, topic string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE users SET ntfy_topic = $1 WHERE id = $2",
+		topic, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update user ntfy topic: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: update user ntfy topic rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: user %d not found", userID)
+	}
+	return nil
+}
+
 // scanUser scans a single user row into a models.User.
 func scanUser(s scanner) (*models.User, error) {
 	var u models.User
@@ -227,7 +246,7 @@ func scanUser(s scanner) (*models.User, error) {
 	err := s.Scan(
 		&u.ID, &u.Provider, &u.ProviderID, &u.Email,
 		&u.DisplayName, &u.AvatarURL, &u.ResumeMarkdown,
-		&onboardingComplete, &createdAt, &lastLoginAt,
+		&onboardingComplete, &u.NtfyTopic, &createdAt, &lastLoginAt,
 	)
 	if err != nil {
 		return nil, err

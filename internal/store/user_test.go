@@ -520,3 +520,72 @@ func TestCreateUserFilter_SetsCreatedAt(t *testing.T) {
 		t.Errorf("CreatedAt = %v, want between %v and %v", filter.CreatedAt, before, after)
 	}
 }
+
+// ─── UpdateUserNtfyTopic ───────────────────────────────────────────────────
+
+func TestUpdateUserNtfyTopic(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("sets ntfy_topic for existing user", func(t *testing.T) {
+		s := openTestStore(t)
+		user, err := s.UpsertUser(ctx, &models.User{
+			Provider:   "google",
+			ProviderID: "ntfy-update",
+			Email:      "ntfy@example.com",
+		})
+		if err != nil {
+			t.Fatalf("UpsertUser error = %v", err)
+		}
+
+		if err := s.UpdateUserNtfyTopic(ctx, user.ID, "my-jobs-topic"); err != nil {
+			t.Fatalf("UpdateUserNtfyTopic error = %v", err)
+		}
+
+		got, err := s.GetUser(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetUser error = %v", err)
+		}
+		if got.NtfyTopic != "my-jobs-topic" {
+			t.Errorf("NtfyTopic = %q, want my-jobs-topic", got.NtfyTopic)
+		}
+	})
+
+	t.Run("clears ntfy_topic when set to empty string", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "ntfy-clear", Email: "nc@example.com"})
+
+		s.UpdateUserNtfyTopic(ctx, user.ID, "some-topic")
+		if err := s.UpdateUserNtfyTopic(ctx, user.ID, ""); err != nil {
+			t.Fatalf("UpdateUserNtfyTopic(empty) error = %v", err)
+		}
+
+		got, err := s.GetUser(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetUser error = %v", err)
+		}
+		if got.NtfyTopic != "" {
+			t.Errorf("NtfyTopic = %q, want empty string after clear", got.NtfyTopic)
+		}
+	})
+
+	t.Run("returns error for non-existent user", func(t *testing.T) {
+		s := openTestStore(t)
+		err := s.UpdateUserNtfyTopic(ctx, 99999, "topic")
+		if err == nil {
+			t.Error("UpdateUserNtfyTopic(nonexistent) expected error, got nil")
+		}
+	})
+
+	t.Run("new user has empty ntfy_topic by default", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "ntfy-default", Email: "nd@example.com"})
+
+		got, err := s.GetUser(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetUser error = %v", err)
+		}
+		if got.NtfyTopic != "" {
+			t.Errorf("NtfyTopic = %q, want empty string for new user", got.NtfyTopic)
+		}
+	})
+}

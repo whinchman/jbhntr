@@ -81,17 +81,19 @@ func (m *mockJobStore) UpdateJobStatus(_ context.Context, userID int64, id int64
 // ─── mock FilterStore ───────────────────────────────────────────────────────
 
 type mockFilterStore struct {
-	mu      sync.Mutex
-	filters map[int64][]models.UserSearchFilter
-	resumes map[int64]string
-	nextID  int64
+	mu          sync.Mutex
+	filters     map[int64][]models.UserSearchFilter
+	resumes     map[int64]string
+	ntfyTopics  map[int64]string
+	nextID      int64
 }
 
 func newMockFilterStore() *mockFilterStore {
 	return &mockFilterStore{
-		filters: make(map[int64][]models.UserSearchFilter),
-		resumes: make(map[int64]string),
-		nextID:  1,
+		filters:    make(map[int64][]models.UserSearchFilter),
+		resumes:    make(map[int64]string),
+		ntfyTopics: make(map[int64]string),
+		nextID:     1,
 	}
 }
 
@@ -128,6 +130,13 @@ func (m *mockFilterStore) UpdateUserResume(_ context.Context, userID int64, mark
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.resumes[userID] = markdown
+	return nil
+}
+
+func (m *mockFilterStore) UpdateUserNtfyTopic(_ context.Context, userID int64, topic string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ntfyTopics[userID] = topic
 	return nil
 }
 
