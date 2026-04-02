@@ -198,3 +198,53 @@ Returns:
 ```
 
 `last_scrape` is omitted if no scrape has completed yet.
+
+A minimal liveness probe is also available at `GET /healthz` — returns
+`{"status":"ok"}` with no auth and no database access. This is the path
+used by Render's health check configuration.
+
+## Deploy to Render
+
+JobHuntr ships with a `render.yaml` file that defines a web service (Docker)
+and a managed Postgres database. Render reads this file automatically when
+you connect the repository.
+
+### One-time setup
+
+1. **Create a Render account** at [render.com](https://render.com) if you
+   do not already have one.
+
+2. **Connect your repository:** In the Render dashboard click
+   *New → Blueprint*, select this repo, and Render will detect `render.yaml`
+   and create the `jobhuntr` web service and `jobhuntr-db` Postgres instance.
+
+3. **Set environment variables:** Open the `jobhuntr` web service in the
+   dashboard, go to *Environment*, and add the following secrets (these are
+   marked `sync: false` in `render.yaml` so Render never stores them in the
+   repo):
+
+   | Variable | Where to get it |
+   |----------|----------------|
+   | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+   | `SERPAPI_KEY` | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
+   | `NTFY_TOPIC` | Any private string; subscribe in the ntfy app |
+   | `SESSION_SECRET` | Run `openssl rand -hex 32` locally |
+   | `GOOGLE_CLIENT_ID` | Google Cloud Console → APIs & Services → Credentials |
+   | `GOOGLE_CLIENT_SECRET` | (same as above) |
+   | `GITHUB_CLIENT_ID` | GitHub → Settings → Developer settings → OAuth Apps |
+   | `GITHUB_CLIENT_SECRET` | (same as above) |
+
+4. **Set `base_url`:** Update `base_url` in `config.yaml` (or override it
+   via an environment variable) to your Render web service URL, e.g.
+   `https://jobhuntr.onrender.com`. This is required so that OAuth redirect
+   URIs resolve correctly after login. You must also register this URL as an
+   authorised redirect URI in your Google and GitHub OAuth app settings.
+
+5. **Deploy:** Render triggers a build automatically on every push to the
+   connected branch. The first deploy builds the Docker image, runs the
+   Postgres migration, and starts the service.
+
+### Render.yaml reference
+
+See [render.com/docs/blueprint-spec](https://render.com/docs/blueprint-spec)
+for full documentation on the `render.yaml` Blueprint format.
