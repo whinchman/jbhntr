@@ -118,6 +118,41 @@ The web dashboard is available at `http://localhost:8080` (or the configured por
 Keep your topic name private — anyone who knows it can post notifications to
 your device.
 
+## Running with Docker
+
+The easiest way to run JobHuntr locally is with Docker Compose, which starts
+the app and a Postgres database together.
+
+**1. Set up your environment file:**
+
+```bash
+cp .env.example .env
+# Edit .env and fill in ANTHROPIC_API_KEY, SERPAPI_KEY, NTFY_TOPIC, SESSION_SECRET, etc.
+```
+
+**2. Create a `config.yaml` from the example:**
+
+```bash
+cp config.yaml.example config.yaml
+```
+
+**3. Start the stack:**
+
+```bash
+docker compose up --build
+```
+
+The app will be available at `http://localhost:8080`. Generated PDFs are
+written to `./output/` on the host. The `DATABASE_URL` is set automatically
+by Compose to point at the `db` service — do not override it in `.env`.
+
+To run in the background:
+
+```bash
+docker compose up --build -d
+docker compose logs -f app
+```
+
 ## Running with systemd
 
 ```bash
