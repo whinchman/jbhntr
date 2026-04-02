@@ -206,6 +206,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Public routes — no auth required.
 	r.Get("/health", s.handleHealth)
+	r.Get("/healthz", s.handleHealthz)
 	r.Get("/login", s.handleLogin)
 
 	// Auth routes are only registered when auth is configured.
@@ -408,6 +409,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleHealthz is a minimal liveness probe used by Render's health check.
+// It returns 200 OK with {"status":"ok"} — no auth required, no DB query.
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
