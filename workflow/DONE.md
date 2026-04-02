@@ -5,6 +5,17 @@ to the default branch.
 
 ---
 
+## Deployment Epic
+
+**Epic:** deployment
+**Completed:** 2026-04-01
+
+Full production deployment stack: SQLite → PostgreSQL migration (pgx/v5 stdlib adapter, all queries and migrations ported); multi-stage Dockerfile with Chromium runtime + non-root user; docker-compose for local dev (app + postgres:16-alpine, named volume, health check); render.yaml for one-click Render Blueprint deploy with managed Postgres; `/healthz` endpoint; README sections for Docker and Render setup.
+
+Tasks: deploy-postgres-migration, deploy-docker, deploy-render (all done, merged to development)
+
+---
+
 ## Full Sign-In / Sign-Up Flow
 
 **Epic:** auth-signin-flow

@@ -8,7 +8,7 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
-## BUG-008: CSRF token missing from settings.html plain-HTML forms
+## ~~BUG-008: CSRF token missing from settings.html plain-HTML forms~~ FIXED
 
 **Severity:** High (blocks core functionality)
 **File:** `internal/web/templates/settings.html` (lines 49, 72)
@@ -30,7 +30,7 @@ Add `<input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">` ins
 
 ---
 
-## BUG-009: Status filter resets after Approve/Reject on dashboard
+## ~~BUG-009: Status filter resets after Approve/Reject on dashboard~~ FIXED
 
 **Severity:** Medium
 **File:** `internal/web/templates/dashboard.html`
