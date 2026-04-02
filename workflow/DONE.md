@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## Per-User NTFY Notifications
+
+**Completed:** 2026-04-01
+
+Replaced global `NTFY_TOPIC` env var with a per-user `ntfy_topic` field. Users set their own ntfy.sh topic in Settings → Notifications; notifications are skipped if the field is blank. `NTFY_TOPIC` removed from config, `.env.example`, and `render.yaml`.
+
+Tasks: per-user-ntfy (done, merged to development)
+
+---
+
 ## Deployment Epic
 
 **Epic:** deployment
