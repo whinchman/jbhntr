@@ -44,7 +44,7 @@ func (s *Store) ensureMigrationsTable() error {
 	_, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			name       TEXT PRIMARY KEY,
-			applied_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
 	`)
 	return err
@@ -109,7 +109,7 @@ func (s *Store) runMigration(name string) error {
 	}
 
 	if _, err := tx.Exec(
-		"INSERT INTO schema_migrations (name) VALUES (?)", name,
+		"INSERT INTO schema_migrations (name) VALUES ($1)", name,
 	); err != nil {
 		return fmt.Errorf("record migration: %w", err)
 	}

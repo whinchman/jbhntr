@@ -12,6 +12,9 @@ auth:
       client_id: "${GITHUB_CLIENT_ID}"
       client_secret: "${GITHUB_CLIENT_SECRET}"
 
+database:
+  url: "${DATABASE_URL}"  # PostgreSQL DSN, e.g.: postgres://user:pass@localhost:5432/jobhuntr?sslmode=disable
+
 scraper:
   interval: "1h"
   serpapi_key: "${SERPAPI_KEY}"

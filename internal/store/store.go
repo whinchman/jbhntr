@@ -1,4 +1,4 @@
-// Package store provides SQLite-backed persistence for jobhuntr.
+// Package store provides PostgreSQL-backed persistence for jobhuntr.
 package store
 
 import (
@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/whinchman/jobhuntr/internal/models"
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// Store wraps a SQLite database connection.
+// Store wraps a PostgreSQL database connection.
 type Store struct {
 	db *sql.DB
 }
@@ -42,7 +42,7 @@ type ListJobsFilter struct {
 
 const schema = `
 CREATE TABLE IF NOT EXISTS jobs (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    id               BIGSERIAL PRIMARY KEY,
     external_id      TEXT    NOT NULL,
     source           TEXT    NOT NULL,
     title            TEXT    NOT NULL DEFAULT '',
@@ -60,20 +60,20 @@ CREATE TABLE IF NOT EXISTS jobs (
     resume_pdf       TEXT    NOT NULL DEFAULT '',
     cover_pdf        TEXT    NOT NULL DEFAULT '',
     error_msg        TEXT    NOT NULL DEFAULT '',
-    discovered_at    DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-    updated_at       DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+    discovered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status       ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_discovered   ON jobs(discovered_at);
 
 CREATE TABLE IF NOT EXISTS scrape_runs (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              BIGSERIAL PRIMARY KEY,
     source          TEXT    NOT NULL DEFAULT '',
     filter_keywords TEXT    NOT NULL DEFAULT '',
     jobs_found      INTEGER NOT NULL DEFAULT 0,
     jobs_new        INTEGER NOT NULL DEFAULT 0,
-    started_at      DATETIME NOT NULL,
-    finished_at     DATETIME NOT NULL,
+    started_at      TIMESTAMPTZ NOT NULL,
+    finished_at     TIMESTAMPTZ NOT NULL,
     error           TEXT    NOT NULL DEFAULT ''
 );
 `
@@ -87,21 +87,17 @@ var validTransitions = map[models.JobStatus][]models.JobStatus{
 	models.StatusFailed:     {models.StatusGenerating},
 }
 
-// Open opens (or creates) the SQLite database at path, applies the schema,
-// and enables WAL mode for better concurrent read performance.
-func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+// Open connects to the PostgreSQL database at dsn, applies the baseline schema,
+// and runs any pending migrations.
+func Open(dsn string) (*Store, error) {
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open db: %w", err)
 	}
 
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("store: enable WAL: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("store: enable foreign keys: %w", err)
+		return nil, fmt.Errorf("store: ping db: %w", err)
 	}
 
 	// Apply baseline schema (idempotent: uses IF NOT EXISTS).
@@ -130,29 +126,23 @@ func (s *Store) Close() error {
 // Returns inserted=true if a new row was created, false if it already existed.
 func (s *Store) CreateJob(ctx context.Context, userID int64, job *models.Job) (bool, error) {
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO jobs
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO jobs
 		  (user_id, external_id, source, title, company, location, description, salary, apply_url, status, discovered_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		ON CONFLICT (user_id, external_id, source) DO NOTHING
+		RETURNING id`,
 		userID, job.ExternalID, job.Source, job.Title, job.Company, job.Location,
 		job.Description, job.Salary, job.ApplyURL, string(job.Status),
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
-	)
+	).Scan(&id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// ON CONFLICT DO NOTHING — row already existed.
+			return false, nil
+		}
 		return false, fmt.Errorf("store: create job: %w", err)
-	}
-
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("store: create job rows affected: %w", err)
-	}
-	if affected == 0 {
-		return false, nil
-	}
-
-	id, err := res.LastInsertId()
-	if err != nil {
-		return true, fmt.Errorf("store: create job last id: %w", err)
 	}
 	job.ID = id
 	job.UserID = userID
@@ -168,11 +158,11 @@ func (s *Store) GetJob(ctx context.Context, userID int64, id int64) (*models.Job
 	q := `SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url,
 	             status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg,
 	             discovered_at, updated_at
-	      FROM jobs WHERE id = ?`
+	      FROM jobs WHERE id = $1`
 	args := []any{id}
 
 	if userID != 0 {
-		q += " AND user_id = ?"
+		q += " AND user_id = $2"
 		args = append(args, userID)
 	}
 
@@ -193,19 +183,23 @@ func (s *Store) GetJob(ctx context.Context, userID int64, id int64) (*models.Job
 func (s *Store) ListJobs(ctx context.Context, userID int64, f ListJobsFilter) ([]models.Job, error) {
 	var where []string
 	var args []any
+	argN := 1
 
 	if userID != 0 {
-		where = append(where, "user_id = ?")
+		where = append(where, fmt.Sprintf("user_id = $%d", argN))
 		args = append(args, userID)
+		argN++
 	}
 	if f.Status != "" {
-		where = append(where, "status = ?")
+		where = append(where, fmt.Sprintf("status = $%d", argN))
 		args = append(args, string(f.Status))
+		argN++
 	}
 	if f.Search != "" {
-		where = append(where, "(title LIKE ? OR company LIKE ? OR description LIKE ?)")
+		where = append(where, fmt.Sprintf("(title ILIKE $%d OR company ILIKE $%d OR description ILIKE $%d)", argN, argN+1, argN+2))
 		like := "%" + f.Search + "%"
 		args = append(args, like, like, like)
+		argN += 3
 	}
 
 	q := "SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url, status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg, discovered_at, updated_at FROM jobs"
@@ -265,11 +259,14 @@ func (s *Store) UpdateJobStatus(ctx context.Context, userID int64, id int64, new
 		return fmt.Errorf("store: invalid transition %s → %s", job.Status, newStatus)
 	}
 
-	q := "UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?"
-	args := []any{string(newStatus), time.Now().UTC().Format(time.RFC3339), id}
+	var q string
+	var args []any
 	if userID != 0 {
-		q += " AND user_id = ?"
-		args = append(args, userID)
+		q = "UPDATE jobs SET status = $1, updated_at = $2 WHERE id = $3 AND user_id = $4"
+		args = []any{string(newStatus), time.Now().UTC().Format(time.RFC3339), id, userID}
+	} else {
+		q = "UPDATE jobs SET status = $1, updated_at = $2 WHERE id = $3"
+		args = []any{string(newStatus), time.Now().UTC().Format(time.RFC3339), id}
 	}
 
 	_, err = s.db.ExecContext(ctx, q, args...)
@@ -282,11 +279,14 @@ func (s *Store) UpdateJobStatus(ctx context.Context, userID int64, id int64, new
 // UpdateJobSummary sets the AI-generated summary and extracted salary on a job.
 // When userID is 0 the update is not scoped by user (worker path).
 func (s *Store) UpdateJobSummary(ctx context.Context, userID int64, id int64, summary, extractedSalary string) error {
-	q := "UPDATE jobs SET summary = ?, extracted_salary = ?, updated_at = ? WHERE id = ?"
-	args := []any{summary, extractedSalary, time.Now().UTC().Format(time.RFC3339), id}
+	var q string
+	var args []any
 	if userID != 0 {
-		q += " AND user_id = ?"
-		args = append(args, userID)
+		q = "UPDATE jobs SET summary = $1, extracted_salary = $2, updated_at = $3 WHERE id = $4 AND user_id = $5"
+		args = []any{summary, extractedSalary, time.Now().UTC().Format(time.RFC3339), id, userID}
+	} else {
+		q = "UPDATE jobs SET summary = $1, extracted_salary = $2, updated_at = $3 WHERE id = $4"
+		args = []any{summary, extractedSalary, time.Now().UTC().Format(time.RFC3339), id}
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
@@ -298,11 +298,14 @@ func (s *Store) UpdateJobSummary(ctx context.Context, userID int64, id int64, su
 // UpdateJobError sets the error message and transitions a job to failed status.
 // When userID is 0 the update is not scoped by user (worker path).
 func (s *Store) UpdateJobError(ctx context.Context, userID int64, id int64, errMsg string) error {
-	q := "UPDATE jobs SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?"
-	args := []any{string(models.StatusFailed), errMsg, time.Now().UTC().Format(time.RFC3339), id}
+	var q string
+	var args []any
 	if userID != 0 {
-		q += " AND user_id = ?"
-		args = append(args, userID)
+		q = "UPDATE jobs SET status = $1, error_msg = $2, updated_at = $3 WHERE id = $4 AND user_id = $5"
+		args = []any{string(models.StatusFailed), errMsg, time.Now().UTC().Format(time.RFC3339), id, userID}
+	} else {
+		q = "UPDATE jobs SET status = $1, error_msg = $2, updated_at = $3 WHERE id = $4"
+		args = []any{string(models.StatusFailed), errMsg, time.Now().UTC().Format(time.RFC3339), id}
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
@@ -314,11 +317,14 @@ func (s *Store) UpdateJobError(ctx context.Context, userID int64, id int64, errM
 // UpdateJobGenerated sets the generated HTML and PDF paths on a job.
 // When userID is 0 the update is not scoped by user (worker path).
 func (s *Store) UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
-	q := "UPDATE jobs SET resume_html=?, cover_html=?, resume_pdf=?, cover_pdf=?, updated_at=? WHERE id=?"
-	args := []any{resumeHTML, coverHTML, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id}
+	var q string
+	var args []any
 	if userID != 0 {
-		q += " AND user_id = ?"
-		args = append(args, userID)
+		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_pdf=$3, cover_pdf=$4, updated_at=$5 WHERE id=$6 AND user_id=$7"
+		args = []any{resumeHTML, coverHTML, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id, userID}
+	} else {
+		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_pdf=$3, cover_pdf=$4, updated_at=$5 WHERE id=$6"
+		args = []any{resumeHTML, coverHTML, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id}
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
@@ -329,19 +335,17 @@ func (s *Store) UpdateJobGenerated(ctx context.Context, userID int64, id int64, 
 
 // CreateScrapeRun inserts a new scrape run log entry.
 func (s *Store) CreateScrapeRun(ctx context.Context, run *ScrapeRun) error {
-	res, err := s.db.ExecContext(ctx, `
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO scrape_runs (source, filter_keywords, jobs_found, jobs_new, started_at, finished_at, error)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id`,
 		run.Source, run.FilterKeywords, run.JobsFound, run.JobsNew,
 		run.StartedAt.UTC().Format(time.RFC3339), run.FinishedAt.UTC().Format(time.RFC3339),
 		run.Error,
-	)
+	).Scan(&id)
 	if err != nil {
 		return fmt.Errorf("store: create scrape run: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: create scrape run last id: %w", err)
 	}
 	run.ID = id
 	return nil

@@ -14,9 +14,10 @@ import (
 
 // Config is the root configuration object.
 type Config struct {
-	Server        ServerConfig   `yaml:"server"`
-	Auth          AuthConfig     `yaml:"auth"`
-	Scraper       ScraperConfig  `yaml:"scraper"`
+	Server   ServerConfig  `yaml:"server"`
+	Auth     AuthConfig    `yaml:"auth"`
+	Database DatabaseConfig `yaml:"database"`
+	Scraper  ScraperConfig `yaml:"scraper"`
 	// SearchFilters holds global search filters parsed from the config file.
 	// Deprecated: per-user search filters are now stored in the database
 	// (user_search_filters table) and managed via the web UI. This field is
@@ -26,8 +27,16 @@ type Config struct {
 	Claude        ClaudeConfig   `yaml:"claude"`
 	// Resume is the fallback resume file for the generator worker. Per-user
 	// resumes are stored in the database (users.resume_markdown).
-	Resume        ResumeConfig   `yaml:"resume"`
-	Output        OutputConfig   `yaml:"output"`
+	Resume ResumeConfig `yaml:"resume"`
+	Output OutputConfig `yaml:"output"`
+}
+
+// DatabaseConfig holds PostgreSQL connection settings.
+type DatabaseConfig struct {
+	// URL is the PostgreSQL DSN, e.g.:
+	// postgres://user:password@host:5432/dbname?sslmode=disable
+	// Can be set via the DATABASE_URL environment variable.
+	URL string `yaml:"url"`
 }
 
 // AuthConfig holds OAuth and session configuration.
