@@ -21,7 +21,6 @@ search_filters:
   - keywords: "staff engineer go"
     location: "New York"
 ntfy:
-  topic: "${TEST_NTFY_TOPIC}"
   server: "https://ntfy.sh"
 claude:
   api_key: "${TEST_CLAUDE_KEY}"
@@ -94,7 +93,6 @@ func TestLoad(t *testing.T) {
 
 	t.Run("substitutes env vars", func(t *testing.T) {
 		t.Setenv("TEST_SERPAPI_KEY", "serpkey123")
-		t.Setenv("TEST_NTFY_TOPIC", "myjobs")
 		t.Setenv("TEST_CLAUDE_KEY", "sk-ant-test")
 
 		path := writeTemp(t, sampleYAML)
@@ -105,9 +103,6 @@ func TestLoad(t *testing.T) {
 
 		if cfg.Scraper.SerpAPIKey != "serpkey123" {
 			t.Errorf("SerpAPIKey = %q, want %q", cfg.Scraper.SerpAPIKey, "serpkey123")
-		}
-		if cfg.Ntfy.Topic != "myjobs" {
-			t.Errorf("Ntfy.Topic = %q, want %q", cfg.Ntfy.Topic, "myjobs")
 		}
 		if cfg.Claude.APIKey != "sk-ant-test" {
 			t.Errorf("Claude.APIKey = %q, want %q", cfg.Claude.APIKey, "sk-ant-test")

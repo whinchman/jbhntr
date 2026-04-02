@@ -36,7 +36,6 @@ fi
 missing=()
 [ -z "${ANTHROPIC_API_KEY:-}" ] && missing+=("ANTHROPIC_API_KEY")
 [ -z "${SERPAPI_KEY:-}" ]       && missing+=("SERPAPI_KEY")
-[ -z "${NTFY_TOPIC:-}" ]        && missing+=("NTFY_TOPIC")
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo "Warning: the following env vars are unset (set them or edit config.yaml):"

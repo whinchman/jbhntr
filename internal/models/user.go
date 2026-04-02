@@ -12,6 +12,7 @@ type User struct {
 	AvatarURL      string
 	ResumeMarkdown     string
 	OnboardingComplete bool
+	NtfyTopic         string
 	CreatedAt          time.Time
 	LastLoginAt        time.Time
 }

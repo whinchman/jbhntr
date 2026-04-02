@@ -69,6 +69,25 @@
 <hr>
 
 <section>
+  <h2>Notifications</h2>
+  <form method="POST" action="/settings/ntfy">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+    <label>
+      NTFY Topic
+      <input type="text" name="ntfy_topic" value="{{.NtfyTopic}}" placeholder="e.g. jobhuntr-yourname">
+    </label>
+    <small style="display:block;margin-top:0.25rem;color:#666;">
+      Your <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a> topic name.
+      Subscribe to this topic in the ntfy app to receive push notifications for new jobs.
+      Leave blank to disable notifications.
+    </small>
+    <button type="submit" style="margin-top:0.75rem;">Save Notifications</button>
+  </form>
+</section>
+
+<hr>
+
+<section>
   <h2>Base Resume</h2>
   <form method="POST" action="/settings/resume">
     <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">

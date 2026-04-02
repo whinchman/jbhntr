@@ -79,8 +79,8 @@ type SearchFilter struct {
 }
 
 // NtfyConfig holds ntfy.sh notification settings.
+// Per-user topics are stored in the database (users.ntfy_topic).
 type NtfyConfig struct {
-	Topic  string `yaml:"topic"`
 	Server string `yaml:"server"`
 }
 

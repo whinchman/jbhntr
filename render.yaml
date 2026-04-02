@@ -5,12 +5,14 @@
 #
 #   ANTHROPIC_API_KEY   — Anthropic Console: https://console.anthropic.com
 #   SERPAPI_KEY         — SerpAPI dashboard: https://serpapi.com/manage-api-key
-#   NTFY_TOPIC          — Any private string; subscribe to it in the ntfy app
 #   SESSION_SECRET      — Random 32-byte string; run: openssl rand -hex 32
 #   GOOGLE_CLIENT_ID    — Google Cloud Console → APIs & Services → Credentials
 #   GOOGLE_CLIENT_SECRET
 #   GITHUB_CLIENT_ID    — GitHub → Settings → Developer settings → OAuth Apps
 #   GITHUB_CLIENT_SECRET
+#
+# Note: NTFY_TOPIC is no longer a global env var. Each user configures their
+# own ntfy topic in the Settings page; it is stored in the database.
 #
 # After deploying, set base_url (in config.yaml or as an env var) to your
 # Render web service URL (e.g. https://jobhuntr.onrender.com) so that OAuth
@@ -31,8 +33,6 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: SERPAPI_KEY
-        sync: false
-      - key: NTFY_TOPIC
         sync: false
       - key: SESSION_SECRET
         sync: false

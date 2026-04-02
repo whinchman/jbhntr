@@ -72,6 +72,7 @@ type FilterStore interface {
 	ListUserFilters(ctx context.Context, userID int64) ([]models.UserSearchFilter, error)
 	DeleteUserFilter(ctx context.Context, userID int64, filterID int64) error
 	UpdateUserResume(ctx context.Context, userID int64, markdown string) error
+	UpdateUserNtfyTopic(ctx context.Context, userID int64, topic string) error
 }
 
 // allStatuses lists job statuses shown as tabs in the dashboard.
@@ -239,6 +240,7 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/settings", s.handleSettings)
 		r.Post("/settings/resume", s.handleSaveResume)
+		r.Post("/settings/ntfy", s.handleSaveNtfyTopic)
 		r.Post("/settings/filters", s.handleAddFilter)
 		r.Post("/settings/filters/remove", s.handleRemoveFilter)
 
@@ -559,6 +561,7 @@ func (s *Server) respondJobAction(w http.ResponseWriter, r *http.Request, job *m
 type settingsData struct {
 	Filters   []models.UserSearchFilter
 	Resume    string
+	NtfyTopic string
 	Saved     bool
 	CSRFToken string
 	User      *models.User
@@ -586,13 +589,16 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resume := ""
+	ntfyTopic := ""
 	if user != nil {
 		resume = user.ResumeMarkdown
+		ntfyTopic = user.NtfyTopic
 	}
 
 	data := settingsData{
 		Filters:   filters,
 		Resume:    resume,
+		NtfyTopic: ntfyTopic,
 		Saved:     r.URL.Query().Get("saved") == "1",
 		CSRFToken: csrf.Token(r),
 		User:      user,
@@ -622,6 +628,30 @@ func (s *Server) handleSaveResume(w http.ResponseWriter, r *http.Request) {
 	if err := s.filterStore.UpdateUserResume(r.Context(), userID, content); err != nil {
 		slog.Error("failed to save resume", "error", err, "user_id", userID)
 		http.Error(w, "failed to save resume", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+}
+
+func (s *Server) handleSaveNtfyTopic(w http.ResponseWriter, r *http.Request) {
+	if s.filterStore == nil {
+		http.Error(w, "settings not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	topic := strings.TrimSpace(r.FormValue("ntfy_topic"))
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+
+	if err := s.filterStore.UpdateUserNtfyTopic(r.Context(), userID, topic); err != nil {
+		slog.Error("failed to save ntfy topic", "error", err, "user_id", userID)
+		http.Error(w, "failed to save notification settings", http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)

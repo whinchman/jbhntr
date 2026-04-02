@@ -28,8 +28,8 @@ scraper:
 #     min_salary: 150000
 
 ntfy:
-  topic: "${NTFY_TOPIC}"
   server: "https://ntfy.sh"
+  # Per-user ntfy topics are configured in the Settings page and stored in the database.
 
 claude:
   api_key: "${ANTHROPIC_API_KEY}"

@@ -28,11 +28,18 @@ type UserFilterReader interface {
 	ListUserFilters(ctx context.Context, userID int64) ([]models.UserSearchFilter, error)
 }
 
+// UserReader provides access to user records.
+// The scheduler uses this to fetch the ntfy topic per user before notifying.
+type UserReader interface {
+	GetUser(ctx context.Context, id int64) (*models.User, error)
+}
+
 // Scheduler periodically searches all configured filters and persists new jobs.
 type Scheduler struct {
 	source      Source
 	store       StoreWriter
 	userFilters UserFilterReader
+	userReader  UserReader
 	notifier    notifier.Notifier
 	summarizer  generator.Summarizer
 	interval    time.Duration
@@ -70,6 +77,13 @@ func (s *Scheduler) WithNotifier(n notifier.Notifier) *Scheduler {
 	return s
 }
 
+// WithUserReader sets the UserReader used to fetch per-user ntfy topics.
+// Required when a Notifier is set; without it notifications are skipped.
+func (s *Scheduler) WithUserReader(ur UserReader) *Scheduler {
+	s.userReader = ur
+	return s
+}
+
 // WithSummarizer sets an optional Summarizer on the Scheduler.
 // When set, each newly discovered job is summarized via Claude.
 func (s *Scheduler) WithSummarizer(sum generator.Summarizer) *Scheduler {
@@ -95,9 +109,21 @@ func (s *Scheduler) RunOnce(ctx context.Context) ([]models.Job, error) {
 			s.logger.Error("failed to list filters for user", "user_id", userID, "error", err)
 			continue
 		}
+
+		// Fetch the user's ntfy topic once per user, before iterating filters.
+		ntfyTopic := ""
+		if s.notifier != nil && s.userReader != nil {
+			user, err := s.userReader.GetUser(ctx, userID)
+			if err != nil {
+				s.logger.Error("failed to get user for ntfy topic", "user_id", userID, "error", err)
+			} else {
+				ntfyTopic = user.NtfyTopic
+			}
+		}
+
 		for _, uf := range filters {
 			filter := userFilterToSearchFilter(uf)
-			jobs, err := s.runFilter(ctx, userID, filter)
+			jobs, err := s.runFilter(ctx, userID, ntfyTopic, filter)
 			if err != nil {
 				s.logger.Error("scrape filter failed", "user_id", userID, "filter", filter.Keywords, "error", err)
 				continue
@@ -127,7 +153,7 @@ func userFilterToSearchFilter(uf models.UserSearchFilter) models.SearchFilter {
 
 // runFilter runs one search filter for a specific user: searches, stores
 // results, logs the run.
-func (s *Scheduler) runFilter(ctx context.Context, userID int64, filter models.SearchFilter) ([]models.Job, error) {
+func (s *Scheduler) runFilter(ctx context.Context, userID int64, ntfyTopic string, filter models.SearchFilter) ([]models.Job, error) {
 	started := time.Now()
 	run := &store.ScrapeRun{
 		Source:         "serpapi",
@@ -179,7 +205,7 @@ func (s *Scheduler) runFilter(ctx context.Context, userID int64, filter models.S
 	)
 
 	newJobs = s.summarizeNewJobs(ctx, userID, newJobs)
-	s.notifyNewJobs(ctx, userID, newJobs)
+	s.notifyNewJobs(ctx, userID, ntfyTopic, newJobs)
 
 	return newJobs, nil
 }
@@ -210,17 +236,20 @@ func (s *Scheduler) summarizeNewJobs(ctx context.Context, userID int64, newJobs 
 
 // notifyNewJobs sends a notification for each newly discovered job and marks
 // it as notified in the store. If no Notifier is configured it is a no-op.
-func (s *Scheduler) notifyNewJobs(ctx context.Context, userID int64, newJobs []models.Job) {
+// topic is the per-user ntfy topic; an empty topic causes Notify to skip silently.
+func (s *Scheduler) notifyNewJobs(ctx context.Context, userID int64, topic string, newJobs []models.Job) {
 	if s.notifier == nil {
 		return
 	}
 	for _, job := range newJobs {
-		if err := s.notifier.Notify(ctx, job); err != nil {
+		if err := s.notifier.Notify(ctx, job, topic); err != nil {
 			s.logger.Error("failed to send notification", "job_id", job.ID, "error", err)
 			continue
 		}
-		if err := s.store.UpdateJobStatus(ctx, userID, job.ID, models.StatusNotified); err != nil {
-			s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
+		if topic != "" {
+			if err := s.store.UpdateJobStatus(ctx, userID, job.ID, models.StatusNotified); err != nil {
+				s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
+			}
 		}
 	}
 }
