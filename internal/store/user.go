@@ -44,7 +44,7 @@ func (s *Store) UpsertUser(ctx context.Context, user *models.User) (*models.User
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO users (provider, provider_id, email, display_name, avatar_url, resume_markdown, onboarding_complete, last_login_at)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, 0, $7)
 		ON CONFLICT(provider, provider_id) DO UPDATE SET
 			email = excluded.email,
 			display_name = excluded.display_name,
@@ -65,7 +65,7 @@ func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, provider, provider_id, email, display_name, avatar_url,
 		       resume_markdown, onboarding_complete, created_at, last_login_at
-		FROM users WHERE id = ?`, id)
+		FROM users WHERE id = $1`, id)
 
 	u, err := scanUser(row)
 	if err != nil {
@@ -83,7 +83,7 @@ func (s *Store) GetUserByProvider(ctx context.Context, provider, providerID stri
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, provider, provider_id, email, display_name, avatar_url,
 		       resume_markdown, onboarding_complete, created_at, last_login_at
-		FROM users WHERE provider = ? AND provider_id = ?`, provider, providerID)
+		FROM users WHERE provider = $1 AND provider_id = $2`, provider, providerID)
 
 	u, err := scanUser(row)
 	if err != nil {
@@ -98,19 +98,16 @@ func (s *Store) GetUserByProvider(ctx context.Context, provider, providerID stri
 // CreateUserFilter inserts a new search filter for the given user.
 // The filter's ID and CreatedAt fields are populated on return.
 func (s *Store) CreateUserFilter(ctx context.Context, userID int64, filter *models.UserSearchFilter) error {
-	res, err := s.db.ExecContext(ctx, `
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO user_search_filters (user_id, keywords, location, min_salary, max_salary, title)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id`,
 		userID, filter.Keywords, filter.Location,
 		filter.MinSalary, filter.MaxSalary, filter.Title,
-	)
+	).Scan(&id)
 	if err != nil {
 		return fmt.Errorf("store: create user filter: %w", err)
-	}
-
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: create user filter last id: %w", err)
 	}
 	filter.ID = id
 	filter.UserID = userID
@@ -124,7 +121,7 @@ func (s *Store) ListUserFilters(ctx context.Context, userID int64) ([]models.Use
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, keywords, location, min_salary, max_salary, title, created_at
 		FROM user_search_filters
-		WHERE user_id = ?
+		WHERE user_id = $1
 		ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list user filters: %w", err)
@@ -146,7 +143,7 @@ func (s *Store) ListUserFilters(ctx context.Context, userID int64) ([]models.Use
 // Returns an error if the filter does not exist or does not belong to the user.
 func (s *Store) DeleteUserFilter(ctx context.Context, userID int64, filterID int64) error {
 	res, err := s.db.ExecContext(ctx,
-		"DELETE FROM user_search_filters WHERE id = ? AND user_id = ?",
+		"DELETE FROM user_search_filters WHERE id = $1 AND user_id = $2",
 		filterID, userID,
 	)
 	if err != nil {
@@ -166,7 +163,7 @@ func (s *Store) DeleteUserFilter(ctx context.Context, userID int64, filterID int
 // UpdateUserResume updates the resume_markdown column for the given user.
 func (s *Store) UpdateUserResume(ctx context.Context, userID int64, markdown string) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE users SET resume_markdown = ? WHERE id = ?",
+		"UPDATE users SET resume_markdown = $1 WHERE id = $2",
 		markdown, userID,
 	)
 	if err != nil {
@@ -187,7 +184,7 @@ func (s *Store) UpdateUserResume(ctx context.Context, userID int64, markdown str
 // completes the onboarding flow.
 func (s *Store) UpdateUserOnboarding(ctx context.Context, userID int64, displayName string, resume string) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE users SET display_name = ?, resume_markdown = ?, onboarding_complete = 1 WHERE id = ?",
+		"UPDATE users SET display_name = $1, resume_markdown = $2, onboarding_complete = 1 WHERE id = $3",
 		displayName, resume, userID,
 	)
 	if err != nil {
@@ -206,7 +203,7 @@ func (s *Store) UpdateUserOnboarding(ctx context.Context, userID int64, displayN
 // UpdateUserDisplayName updates the display_name column for the given user.
 func (s *Store) UpdateUserDisplayName(ctx context.Context, userID int64, displayName string) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE users SET display_name = ? WHERE id = ?",
+		"UPDATE users SET display_name = $1 WHERE id = $2",
 		displayName, userID,
 	)
 	if err != nil {

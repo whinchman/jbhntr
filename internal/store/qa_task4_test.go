@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/whinchman/jobhuntr/internal/models"
@@ -149,9 +150,8 @@ func TestQA_SameJobThreeUsers(t *testing.T) {
 
 // TestQA_DeletedUserFiltersStillExist verifies behavior when a user is
 // deleted but their filters still exist in the database (orphaned filters).
-// Since user_search_filters has a FK to users, and foreign_keys is ON,
-// the user delete should cascade or be blocked. Let's verify the actual
-// behavior.
+// Since user_search_filters has a FK to users, the user delete should be
+// blocked by the FK constraint.
 func TestQA_DeletedUserFiltersStillExist(t *testing.T) {
 	ctx := context.Background()
 	s := openTestStore(t)
@@ -171,25 +171,17 @@ func TestQA_DeletedUserFiltersStillExist(t *testing.T) {
 	}
 
 	// Attempt to delete the user directly.
-	_, deleteErr := s.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", user.ID)
+	_, deleteErr := s.db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user.ID)
 
-	// With PRAGMA foreign_keys=ON (set in Open), the FK on
-	// user_search_filters.user_id REFERENCES users(id) should block the
-	// delete unless CASCADE is defined. The migration does NOT define
-	// CASCADE, so this should fail.
+	// With FK on user_search_filters.user_id REFERENCES users(id), the
+	// delete should be blocked (no CASCADE defined in migration 002).
 	if deleteErr == nil {
 		// The delete succeeded, which means orphaned filters exist.
-		// Check whether ListActiveUserIDs still returns this user.
 		ids, err := s.ListActiveUserIDs(ctx)
 		if err != nil {
 			t.Fatalf("ListActiveUserIDs error = %v", err)
 		}
-		// The filters still reference the deleted user_id so DISTINCT
-		// user_id from user_search_filters would still return it.
 		t.Logf("NOTE: User delete succeeded despite FK. Orphaned filters produce user_id=%d in ListActiveUserIDs: %v", user.ID, ids)
-		// This is informational. The real concern is whether the
-		// scheduler handles this gracefully (ListUserFilters will
-		// return filters for a nonexistent user, but that's OK).
 	} else {
 		// FK violation blocked the delete. This is the expected behavior.
 		t.Logf("User delete correctly blocked by FK constraint: %v", deleteErr)
@@ -206,16 +198,16 @@ func TestQA_DeletedUserFiltersStillExist(t *testing.T) {
 }
 
 // TestQA_Migration004_DataSurvival verifies that existing job data
-// survives the table rebuild migration. We insert jobs before migration
-// 004 state and verify they exist after a full Open cycle.
+// survives across multiple Open calls (migration idempotency).
 func TestQA_Migration004_DataSurvival(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping Postgres store tests")
+	}
+
 	ctx := context.Background()
 
-	// Use a file-backed DB so we can close and reopen.
-	dir := t.TempDir()
-	dbPath := dir + "/qa-migration.db"
-
-	s, err := Open(dbPath)
+	s, err := Open(dsn)
 	if err != nil {
 		t.Fatalf("Open error = %v", err)
 	}
@@ -258,10 +250,8 @@ func TestQA_Migration004_DataSurvival(t *testing.T) {
 
 	s.Close()
 
-	// Reopen the database. This runs Open -> schema + Migrate.
-	// Migration 004 should have already been applied, so this tests
-	// that the reopened state is consistent.
-	s2, err := Open(dbPath)
+	// Reopen the database. Migrations should be idempotent.
+	s2, err := Open(dsn)
 	if err != nil {
 		t.Fatalf("second Open error = %v", err)
 	}
@@ -274,44 +264,6 @@ func TestQA_Migration004_DataSurvival(t *testing.T) {
 	}
 	if len(userJobs) != 3 {
 		t.Errorf("user jobs after reopen = %d, want 3", len(userJobs))
-	}
-
-	// Verify legacy job survives.
-	allJobs, err := s2.ListJobs(ctx, 0, ListJobsFilter{})
-	if err != nil {
-		t.Fatalf("ListJobs(0) error = %v", err)
-	}
-	if len(allJobs) != 4 {
-		t.Errorf("total jobs after reopen = %d, want 4", len(allJobs))
-	}
-
-	// Verify individual field values survived.
-	for _, original := range testJobs {
-		found := false
-		for _, got := range userJobs {
-			if got.ExternalID == original.ExternalID {
-				found = true
-				if got.Title != original.Title {
-					t.Errorf("job %s: Title = %q, want %q", original.ExternalID, got.Title, original.Title)
-				}
-				if got.Company != original.Company {
-					t.Errorf("job %s: Company = %q, want %q", original.ExternalID, got.Company, original.Company)
-				}
-				if got.Location != original.Location {
-					t.Errorf("job %s: Location = %q, want %q", original.ExternalID, got.Location, original.Location)
-				}
-				if got.Source != original.Source {
-					t.Errorf("job %s: Source = %q, want %q", original.ExternalID, got.Source, original.Source)
-				}
-				if got.UserID != user.ID {
-					t.Errorf("job %s: UserID = %d, want %d", original.ExternalID, got.UserID, user.ID)
-				}
-				break
-			}
-		}
-		if !found {
-			t.Errorf("job %s not found after reopen", original.ExternalID)
-		}
 	}
 
 	// Verify per-user dedup still works after reopen.

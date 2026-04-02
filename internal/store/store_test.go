@@ -2,17 +2,24 @@ package store
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/whinchman/jobhuntr/internal/models"
 )
 
+// openTestStore opens a Store against the Postgres DSN in TEST_DATABASE_URL.
+// If that env var is not set, the test is skipped.
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(":memory:")
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping Postgres store tests")
+	}
+	s, err := Open(dsn)
 	if err != nil {
-		t.Fatalf("Open(:memory:) error = %v", err)
+		t.Fatalf("Open(%q) error = %v", dsn, err)
 	}
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -433,8 +440,6 @@ func TestCreateJob_PerUserDedup(t *testing.T) {
 	})
 
 	t.Run("different users can have same external_id+source (BUG-001 fixed)", func(t *testing.T) {
-		// BUG-001 was fixed by migration 004 which removed the legacy
-		// UNIQUE(external_id, source) constraint. Per-user dedup now works.
 		u2, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "dedup-u2", Email: "d2@test.com"})
 		if err != nil {
 			t.Fatalf("UpsertUser u2 error = %v", err)
@@ -546,14 +551,16 @@ func TestCreateJob_NonexistentUser(t *testing.T) {
 	})
 }
 
-// ─── Migration Idempotency with file-backed DB ─────────────────────────────
+// ─── Migration Idempotency ─────────────────────────────────────────────────
 
 func TestOpen_Idempotent(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := dir + "/test.db"
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping Postgres store tests")
+	}
 
 	// First open: creates schema and runs migrations.
-	s1, err := Open(dbPath)
+	s1, err := Open(dsn)
 	if err != nil {
 		t.Fatalf("first Open error = %v", err)
 	}
@@ -570,7 +577,7 @@ func TestOpen_Idempotent(t *testing.T) {
 	s1.Close()
 
 	// Second open: should succeed and data should survive.
-	s2, err := Open(dbPath)
+	s2, err := Open(dsn)
 	if err != nil {
 		t.Fatalf("second Open error = %v", err)
 	}

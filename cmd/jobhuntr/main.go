@@ -23,7 +23,6 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
-	dbPath := flag.String("db", "jobhuntr.db", "path to SQLite database file")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -35,12 +34,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	dsn := cfg.Database.URL
+	if dsn == "" {
+		slog.Error("database.url is not set in config; set DATABASE_URL environment variable")
+		os.Exit(1)
+	}
+
 	fmt.Printf("jobhuntr starting on :%d\n", cfg.Server.Port)
 	slog.Info("jobhuntr starting", "port", cfg.Server.Port, "base_url", cfg.Server.BaseURL)
 
-	db, err := store.Open(*dbPath)
+	db, err := store.Open(dsn)
 	if err != nil {
-		slog.Error("failed to open database", "error", err, "path", *dbPath)
+		slog.Error("failed to open database", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
