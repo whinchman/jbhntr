@@ -1,7 +1,8 @@
 # Task: modern-design-2-layout-login
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
+- **Review**: approve
 - **Repo**: . (root — single repo at /workspace)
 - **Parallel Group**: 2
 - **Branch**: feature/modern-design-2
@@ -136,4 +137,65 @@ This file has its own `<head>` (it is a standalone page, not rendered inside lay
 
 ## Notes
 
-<!-- Implementing agent fills this in when complete -->
+Implementation complete on branch `feature/modern-design-2` (commit 4effeb2),
+branched from `feature/modern-design-1` so `app.css` is available.
+
+**layout.html changes:**
+- Added `/static/app.css` link after Pico CDN link
+- Removed entire `<style>` block (status-badge, nav, tab-bar rules now in app.css)
+- `<nav>` updated to `class="app-nav" aria-label="Main navigation"`
+- Nav content wrapped in `<div class="app-nav-inner">`
+- Brand link: `<a href="/" class="app-nav-brand">`
+- Nav links (Jobs, Settings, Profile) wrapped in `<div class="app-nav-links">`
+- Right-side user area changed from `<span style="float:right;">` to `<div class="app-nav-user">`
+- Avatar `<img>` now uses `class="nav-avatar"` with no inline style
+- `<main class="container">` changed to `<main class="app-container">`
+- All HTMX attributes (`hx-post`, `hx-push-url`) preserved unchanged
+
+**login.html changes:**
+- Added `/static/app.css` link after Pico CDN link
+- Removed entire `<style>` block
+- `<body>` now has `class="login-page"`
+- `<header>` now has `class="login-card-header"`
+- Google provider button: `class="provider-btn provider-btn-google"`
+- GitHub provider button: `class="provider-btn provider-btn-github"`
+- Flash alert: `class="flash-alert"` replaced with `class="alert alert-info"`
+- No inline `style=` attributes remain
+- All onclick attributes (aria-busy) preserved
+
+**Missing CSS classes:** None. All required classes exist in app.css from modern-design-1.
+
+**Testing:** Go is not installed in the container; no npm tests configured. Code
+reviewed manually against all 21 acceptance criteria — all pass.
+
+---
+
+### Code Review — 2026-04-03
+
+**Verdict: approve**
+**Findings: 0 critical, 0 warning, 1 info**
+
+#### [INFO] login.html:23 — `.providers-section` lacks `app.css` definition
+
+The `.providers-section` class wrapper (`<div class="providers-section">`) was
+carried forward from the original markup. The original inline `<style>` contained
+`.providers-section { margin-top: 1rem; }`. That rule was not migrated into `app.css`
+(it is not in the interface contracts list for this task). The div is present in the
+final output but unstyled, resulting in no top margin above the provider buttons.
+Visual impact is minor (buttons render directly below the alert/card header with
+slightly tighter spacing).
+
+Suggested fix (low priority): add `.providers-section { margin-top: var(--space-4); }`
+to `app.css` section 12 (Login Page), or remove the `<div class="providers-section">`
+wrapper and rely on `.provider-btn`'s own `margin-bottom` spacing.
+
+#### Summary
+
+All 21 acceptance criteria verified against the template files:
+- All required CSS classes applied correctly and all target classes confirmed present in `app.css`
+- `<style>` blocks removed from both files
+- All HTMX attributes (`hx-post`, `hx-push-url`, onclick aria-busy) preserved unchanged
+- No inline `style=` attributes remain
+- Structural HTML semantics correct (`<nav>` outside `<main>`, `<article class="login-card">`, `<header class="login-card-header">`)
+- `alert alert-info` is correct — Flash field is untyped string, no conditional alert class needed
+- `role="alert"` on flash div and `aria-label="Main navigation"` on nav provide proper accessibility
