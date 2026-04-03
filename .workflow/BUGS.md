@@ -8,6 +8,38 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-010: `.providers-section` used in login.html but not defined in app.css
+
+**Severity:** Low (minor visual spacing regression)
+**File:** `internal/web/templates/login.html` (line 23), `internal/web/templates/static/app.css`
+**Found by:** QA agent (modern-design feature)
+**Branch:** feature/modern-design-2
+
+### Description
+
+`login.html` uses `<div class="providers-section">` as a wrapper around the OAuth provider buttons. The original `login.html` had an inline `<style>` with `.providers-section { margin-top: 1rem; }`. That inline style was removed as part of task modern-design-2, but the `.providers-section` class rule was not migrated to `app.css`.
+
+As a result the provider buttons appear with slightly tighter top margin than the original design (they render directly below the flash-alert / card header with no explicit top spacing). The buttons are functional and render correctly otherwise.
+
+### Reproduction
+
+1. Navigate to `/login`
+2. Observe the gap between the card header / flash alert and the "Sign in with Google" / "Sign in with GitHub" buttons — it is smaller than intended
+
+### Fix
+
+Add one of the following to `app.css` in the Login Page section (around line 682):
+
+```css
+.providers-section {
+  margin-top: var(--space-4);
+}
+```
+
+Or, alternatively, remove the `.providers-section` wrapper `<div>` from `login.html` entirely and rely on `.provider-btn`'s own `margin-bottom` spacing between buttons.
+
+---
+
 ## ~~BUG-008: CSRF token missing from settings.html plain-HTML forms~~ FIXED
 
 **Severity:** High (blocks core functionality)

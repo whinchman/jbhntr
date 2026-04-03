@@ -304,3 +304,11 @@ All 20+ CSS class groups verified present. Brace balance verified (108 open / 10
 - `fs.Sub` panic on error is consistent with the pattern used by the rest of the server (template parse failures also use `template.Must` which panics — no inconsistency).
 
 **Build**: Go toolchain unavailable in container; must be verified on a dev machine. Code pattern is correct per spec and existing codebase conventions.
+
+---
+
+## QA — modern-design-1-css-static — 2026-04-03
+
+**Verdict: PASS**
+
+All 53 required CSS classes verified present in `app.css` (grep confirmed). CSS brace balance: 108 open / 108 close. All 4 required responsive breakpoints present (max-width:639px, min-width:640px, min-width:768px, min-width:900px). Static route in `server.go` confirmed: `"io/fs"` import present, `/static/*` route registered at line 214 before all auth subrouters (public, no auth required). `//go:embed templates` directive intact. No functional bugs found.

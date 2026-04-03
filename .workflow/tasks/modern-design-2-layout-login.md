@@ -199,3 +199,19 @@ All 21 acceptance criteria verified against the template files:
 - Structural HTML semantics correct (`<nav>` outside `<main>`, `<article class="login-card">`, `<header class="login-card-header">`)
 - `alert alert-info` is correct — Flash field is untyped string, no conditional alert class needed
 - `role="alert"` on flash div and `aria-label="Main navigation"` on nav provide proper accessibility
+
+---
+
+## QA — modern-design-2-layout-login — 2026-04-03
+
+**Verdict: PASS**
+
+All acceptance criteria verified:
+- No `style=` attributes in layout.html or login.html (grep clean)
+- `/static/app.css` link present in both files
+- All required CSS classes correctly applied (app-nav, app-nav-inner, app-nav-brand, app-nav-links, app-nav-user, nav-avatar, app-container, login-page, login-card, login-card-header, provider-btn-google, provider-btn-github, alert alert-info)
+- Go template brace balance: layout.html 16/16 OK, login.html 11/11 OK
+- HTMX attributes: layout.html 2, login.html 0 — matches development branch counts
+- CSRF meta tag preserved in layout.html
+- layout.html gained 2 additional `{{` markers for new `{{if .User}}` conditional Profile link — this is intentional and correct (only show Profile link to authenticated users)
+- One known low-severity finding: `.providers-section` used in login.html line 23 but not defined in app.css (carried forward from original markup; minor spacing regression — buttons render with tighter top margin). Logged as BUG-010.
