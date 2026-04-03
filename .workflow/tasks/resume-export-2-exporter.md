@@ -1,7 +1,7 @@
 # Task: resume-export-2-exporter
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Repo**: .
 - **Parallel Group**: 2
 - **Branch**: feature/resume-export-2-exporter
@@ -18,17 +18,17 @@ Files to create:
 
 ## Acceptance Criteria
 
-- [ ] `internal/exporter/docx.go` exists in package `exporter`
-- [ ] `ToDocx(md string) ([]byte, error)` is exported and compiles cleanly
-- [ ] Handles ATX headings: `# H1`, `## H2`, `### H3`
-- [ ] Handles bold: `**text**`
-- [ ] Handles italic: `_text_` and `*text*` (when not bold)
-- [ ] Handles unordered lists: lines starting with `- ` or `* `
-- [ ] Handles plain paragraphs and blank lines as paragraph breaks
-- [ ] Empty string input returns a valid (empty) DOCX without error
-- [ ] Unknown/unsupported Markdown (e.g. tables, code blocks) is rendered as plain text rather than panicking
-- [ ] `internal/exporter/docx_test.go` has unit tests covering: H1, H2, H3, bold run, italic run, unordered list item, plain paragraph, empty input, mixed content
-- [ ] All tests pass (`go test ./internal/exporter/...`)
+- [x] `internal/exporter/docx.go` exists in package `exporter`
+- [x] `ToDocx(md string) ([]byte, error)` is exported and compiles cleanly
+- [x] Handles ATX headings: `# H1`, `## H2`, `### H3`
+- [x] Handles bold: `**text**`
+- [x] Handles italic: `_text_` and `*text*` (when not bold)
+- [x] Handles unordered lists: lines starting with `- ` or `* `
+- [x] Handles plain paragraphs and blank lines as paragraph breaks
+- [x] Empty string input returns a valid (empty) DOCX without error
+- [x] Unknown/unsupported Markdown (e.g. tables, code blocks) is rendered as plain text rather than panicking
+- [x] `internal/exporter/docx_test.go` has unit tests covering: H1, H2, H3, bold run, italic run, unordered list item, plain paragraph, empty input, mixed content
+- [x] All tests pass (`go test ./internal/exporter/...`)
 
 ## Interface Contracts
 
@@ -72,4 +72,18 @@ Consult the godocx README/examples at `go doc github.com/gomutex/godocx` for the
 
 ## Notes
 
-<!-- Implementing agent fills in when complete -->
+### Implementation Summary (Coder Agent)
+
+**Branch**: `feature/resume-export-2-exporter` (branched from `feature/resume-export-1-foundation`)
+
+**Files created**:
+- `internal/exporter/docx.go` — `ToDocx(md string) ([]byte, error)` using `github.com/gomutex/godocx`
+- `internal/exporter/docx_test.go` — 18 unit tests, all passing
+
+**Approach**: Line-by-line state machine parser as specified in the plan. Longer heading prefixes (`### `) checked before shorter ones (`# `). Inline spans handled by `parseInline()` which walks the string byte-by-byte detecting `**bold**`, `_italic_`, and `*italic*` delimiters. Unordered lists use godocx style `"List Bullet"`. Unknown Markdown (tables, code blocks, etc.) falls through to plain paragraph accumulation.
+
+**Test coverage**: empty input, H1/H2/H3 headings, bold run, italic run (both `_` and `*`), unordered list (`-` and `*`), plain paragraph, blank-line paragraph separation, mixed content, unknown Markdown (plain text fallback), plus `parseInline` unit tests.
+
+**Test results**: `go test ./internal/exporter/... -v` — 18/18 PASS
+
+**Note**: `go mod tidy` was run to resolve a missing go.sum entry for `github.com/stretchr/testify`. The go.mod was reorganized (direct vs indirect dependencies) as a side effect.
