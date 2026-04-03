@@ -73,6 +73,7 @@ type UserStore interface {
 	ConsumeResetToken(ctx context.Context, token string, newPasswordHash string) (*models.User, error)
 	SetEmailVerifyToken(ctx context.Context, userID int64, token string, expiresAt time.Time) error
 	ConsumeVerifyToken(ctx context.Context, token string) (*models.User, error)
+	GetUserByResetToken(ctx context.Context, token string) (*models.User, error)
 }
 
 // FilterStore is the subset of store.Store used by the settings handlers.

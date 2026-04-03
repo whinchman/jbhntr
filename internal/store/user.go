@@ -207,6 +207,24 @@ func (s *Store) ConsumeVerifyToken(ctx context.Context, token string) (*models.U
 	return u, nil
 }
 
+// GetUserByResetToken retrieves a user whose reset_token matches and whose
+// reset_expires_at is in the future. Returns nil, nil when not found or expired.
+// This method does NOT consume (clear) the token.
+func (s *Store) GetUserByResetToken(ctx context.Context, token string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE reset_token = $1 AND reset_expires_at > NOW()",
+		token,
+	)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: get user by reset token: %w", err)
+	}
+	return u, nil
+}
+
 // CreateUserFilter inserts a new search filter for the given user.
 // The filter's ID and CreatedAt fields are populated on return.
 func (s *Store) CreateUserFilter(ctx context.Context, userID int64, filter *models.UserSearchFilter) error {

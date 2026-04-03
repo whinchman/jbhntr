@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/csrf"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
 
@@ -235,7 +236,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	flash := s.consumeFlash(w, r)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.loginTmpl.ExecuteTemplate(w, "login.html", loginData{Providers: providers, Flash: flash}); err != nil {
+	if err := s.loginTmpl.ExecuteTemplate(w, "login.html", loginData{
+		Providers: providers,
+		Flash:     flash,
+		CSRFToken: csrf.Token(r),
+	}); err != nil {
 		slog.Error("login template render error", "error", err)
 	}
 }

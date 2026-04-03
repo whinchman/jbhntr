@@ -39,6 +39,22 @@
         <p><em>No OAuth providers are configured.</em></p>
       {{end}}
     </div>
+
+    {{if .CSRFToken}}
+    <div class="email-auth-section">
+      <form method="POST" action="/login">
+        <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+        <label>Email
+          <input type="email" name="email" value="{{.Email}}" autocomplete="email" required>
+        </label>
+        <label>Password
+          <input type="password" name="password" autocomplete="current-password" required>
+        </label>
+        <button type="submit">Sign in</button>
+      </form>
+      <p><a href="/forgot-password">Forgot password?</a> &middot; <a href="/register">Create account</a></p>
+    </div>
+    {{end}}
   </article>
 </body>
 </html>
