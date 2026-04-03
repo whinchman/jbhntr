@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -o ./tmp/air-main ./cmd/jobhuntr"
+cmd = "go build -buildvcs=false -o ./tmp/air-main ./cmd/jobhuntr"
 bin = "./tmp/air-main"
 args_bin = ["--config", "config.yaml"]
 include_ext = ["go"]
