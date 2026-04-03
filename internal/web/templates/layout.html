@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{block "title" .}}JobHuntr{{end}}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/app.css">
   {{if .CSRFToken}}
   <meta name="csrf-token" content="{{.CSRFToken}}">
   {{end}}
@@ -18,49 +19,35 @@
       }
     });
   </script>
-  <style>
-    .status-badge {
-      display: inline-block;
-      padding: 0.15em 0.5em;
-      border-radius: 0.3em;
-      font-size: 0.8em;
-      font-weight: bold;
-    }
-    .status-discovered  { background:#e3f2fd; color:#1565c0; }
-    .status-notified    { background:#f3e5f5; color:#6a1b9a; }
-    .status-approved    { background:#e8f5e9; color:#2e7d32; }
-    .status-rejected    { background:#ffebee; color:#b71c1c; }
-    .status-generating  { background:#fff8e1; color:#f57f17; }
-    .status-complete    { background:#e0f2f1; color:#004d40; }
-    .status-failed      { background:#fce4ec; color:#880e4f; }
-    nav { margin-bottom: 1.5rem; }
-    .tab-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-    .tab-bar a { text-decoration: none; }
-  </style>
 </head>
 <body>
-  <main class="container">
-    <nav>
-      <strong><a href="/">JobHuntr</a></strong>
-      &nbsp;·&nbsp;
-      <a href="/">Jobs</a>
-      &nbsp;·&nbsp;
-      <a href="/settings">Settings</a>
+  <nav class="app-nav" aria-label="Main navigation">
+    <div class="app-nav-inner">
+      <a href="/" class="app-nav-brand"><strong>JobHuntr</strong></a>
+      <div class="app-nav-links">
+        <a href="/">Jobs</a>
+        <a href="/settings">Settings</a>
+        {{if .User}}
+        <a href="/profile">Profile</a>
+        {{end}}
+      </div>
       {{if .User}}
-      &nbsp;·&nbsp;
-      <a href="/profile">Profile</a>
-      <span style="float:right;">
+      <div class="app-nav-user">
         {{if .User.AvatarURL}}
-        <img src="{{.User.AvatarURL}}" alt="" style="width:24px;height:24px;border-radius:50%;vertical-align:middle;">
+        <img src="{{.User.AvatarURL}}" alt="" class="nav-avatar">
         {{end}}
         {{.User.DisplayName}}
         &nbsp;·&nbsp;
         <a href="#" hx-post="/logout" hx-push-url="/login">Sign out</a>
-      </span>
+      </div>
       {{else}}
-      <span style="float:right;"><a href="/login">Sign in</a></span>
+      <div class="app-nav-user">
+        <a href="/login">Sign in</a>
+      </div>
       {{end}}
-    </nav>
+    </div>
+  </nav>
+  <main class="app-container">
     {{block "content" .}}{{end}}
   </main>
 </body>
