@@ -1,0 +1,35 @@
+{{template "layout.html" .}}
+
+{{define "title"}}JobHuntr — Rejected Jobs{{end}}
+
+{{define "content"}}
+<h1>Rejected Jobs</h1>
+<div class="job-table-wrapper">
+  <table class="job-table" id="rejected-job-table">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Company</th>
+        <th>Location</th>
+        <th>Salary</th>
+        <th>Discovered</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{if not .Jobs}}
+      <tr><td colspan="5" class="job-table-empty">No rejected jobs.</td></tr>
+      {{else}}
+      {{range .Jobs}}
+      <tr>
+        <td><a href="/jobs/{{.ID}}">{{.Title}}</a></td>
+        <td>{{.Company}}</td>
+        <td>{{.Location}}</td>
+        <td>{{if .ExtractedSalary}}{{.ExtractedSalary}}{{else if .Salary}}{{.Salary}}{{else}}—{{end}}</td>
+        <td>{{.DiscoveredAt.Format "Jan 2, 2006"}}</td>
+      </tr>
+      {{end}}
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}

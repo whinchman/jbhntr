@@ -1333,3 +1333,106 @@ func TestDownloadCoverDocx(t *testing.T) {
 		}
 	})
 }
+
+// ─── approved/rejected pages and application status tests ─────────────────────
+
+func TestHandleApprovedJobs_RequiresAuth(t *testing.T) {
+	ts := newServer(t,
+		newTestJob(1, models.StatusApproved),
+		newTestJob(2, models.StatusComplete),
+	)
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL + "/jobs/approved")
+	if err != nil {
+		t.Fatalf("GET /jobs/approved: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	_ = body // response rendered without error
+}
+
+func TestHandleRejectedJobs_RequiresAuth(t *testing.T) {
+	ts := newServer(t,
+		newTestJob(1, models.StatusRejected),
+	)
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL + "/jobs/rejected")
+	if err != nil {
+		t.Fatalf("GET /jobs/rejected: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+func TestHandleSetApplicationStatus_HTMXResponse(t *testing.T) {
+	job := newTestJob(1, models.StatusApproved)
+	ts := newServer(t, job)
+	defer ts.Close()
+
+	form := url.Values{"application_status": {"applied"}}
+	resp, err := ts.Client().PostForm(ts.URL+"/api/jobs/1/application-status", form)
+	if err != nil {
+		t.Fatalf("POST /api/jobs/1/application-status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body: %s", resp.StatusCode, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+func TestHandleSetApplicationStatus_InvalidStatus(t *testing.T) {
+	job := newTestJob(1, models.StatusApproved)
+	ts := newServer(t, job)
+	defer ts.Close()
+
+	form := url.Values{"application_status": {"bogus"}}
+	resp, err := ts.Client().PostForm(ts.URL+"/api/jobs/1/application-status", form)
+	if err != nil {
+		t.Fatalf("POST /api/jobs/1/application-status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want 400; body: %s", resp.StatusCode, body)
+	}
+}
+
+func TestHandleSetApplicationStatus_NonApprovedJob(t *testing.T) {
+	// A job in "discovered" status is not in the approved pipeline.
+	job := newTestJob(1, models.StatusDiscovered)
+	ts := newServer(t, job)
+	defer ts.Close()
+
+	form := url.Values{"application_status": {"applied"}}
+	resp, err := ts.Client().PostForm(ts.URL+"/api/jobs/1/application-status", form)
+	if err != nil {
+		t.Fatalf("POST /api/jobs/1/application-status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want 403; body: %s", resp.StatusCode, body)
+	}
+}
