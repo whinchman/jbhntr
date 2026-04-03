@@ -85,7 +85,7 @@ func (m *SMTPMailer) SendMail(ctx context.Context, to, subject, body string) err
 	defer w.Close() //nolint:errcheck
 
 	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
+		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
 		m.from, to, subject, body,
 	)
 	if _, err = fmt.Fprint(w, msg); err != nil {

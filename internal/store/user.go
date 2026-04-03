@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/whinchman/jobhuntr/internal/models"
 )
 
@@ -447,5 +447,9 @@ func scanUserFilter(s scanner) (*models.UserSearchFilter, error) {
 // isUniqueViolation returns true if err is a PostgreSQL unique constraint
 // violation (SQLSTATE 23505).
 func isUniqueViolation(err error) bool {
-	return strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "unique")
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }
