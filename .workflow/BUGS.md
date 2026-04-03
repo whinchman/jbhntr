@@ -8,6 +8,41 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-013: Test panic — body[:4] accessed when len(body) < 4 in DOCX download tests
+
+**Severity:** Warning
+**File:** `internal/web/server_test.go`, lines 1225 and 1287
+**Found by:** Code Reviewer agent (resume-export-3-routes review)
+**Branch:** feature/resume-export-3-routes
+
+### Description
+
+In `TestDownloadResumeDocx` and `TestDownloadCoverDocx`, the magic-bytes check guards with `len(body) < 2` but the `t.Errorf` format string contains `body[:4]`. If `len(body)` is 0, 1, 2, or 3 — which happens whenever the server returns a short error body — the slice expression `body[:4]` panics with an index-out-of-range, killing the test process instead of reporting a clean test failure.
+
+### Reproduction
+
+1. Make the `exporter.ToDocx` function return an error (e.g. by temporarily stubbing it).
+2. Run `go test ./internal/web/... -run TestDownloadResumeDocx`.
+3. Observe a panic: `runtime error: slice bounds out of range [:4] with length <n>` (where n < 4).
+
+### Fix
+
+Change line 1224 (and the equivalent at line 1286) from:
+```go
+if len(body) < 2 || body[0] != 'P' || body[1] != 'K' {
+    t.Errorf("body does not look like a DOCX/ZIP file (first bytes: %v)", body[:4])
+}
+```
+to:
+```go
+if len(body) < 4 || body[0] != 'P' || body[1] != 'K' {
+    t.Errorf("body does not look like a DOCX/ZIP file (first bytes: %v)", body)
+}
+```
+This aligns the guard with the format verb and avoids the out-of-bounds access.
+
+---
+
 ## BUG-012: parseInline treats `_` as italic delimiter inside words, corrupting identifiers with underscores
 
 **Severity:** Warning

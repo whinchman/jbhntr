@@ -1,7 +1,7 @@
 # Task: resume-export-3-routes
 
-- **Type**: coder
-- **Status**: pending
+- **Type**: code-reviewer
+- **Status**: done
 - **Repo**: .
 - **Parallel Group**: 3
 - **Branch**: feature/resume-export-3-routes
@@ -89,4 +89,55 @@ CoverPDF       string  // non-empty only if PDF conversion succeeded
 
 ## Notes
 
-<!-- Implementing agent fills in when complete -->
+### Implementation Summary
+
+**Branch**: `feature/resume-export-3-routes` (worktree at `/workspace/worktrees/resume-export-3-routes`)
+**Based on**: `feature/resume-export-2-exporter`
+**Commit**: `5572059`
+
+**Changes made**:
+
+1. `internal/web/server.go`:
+   - Added import for `github.com/whinchman/jobhuntr/internal/exporter`
+   - Registered 4 new routes in `Handler()`: `/output/{id}/resume.md`, `/output/{id}/cover_letter.md`, `/output/{id}/resume.docx`, `/output/{id}/cover_letter.docx`
+   - Implemented `handleDownloadResumeMarkdown` — returns `text/markdown` with `Content-Disposition: attachment; filename=resume.md`; 404 if `ResumeMarkdown == ""`
+   - Implemented `handleDownloadCoverMarkdown` — same pattern for CoverMarkdown
+   - Implemented `handleDownloadResumeDocx` — calls `exporter.ToDocx(job.ResumeMarkdown)`, returns DOCX content type; 404 if empty, 500 on ToDocx error
+   - Implemented `handleDownloadCoverDocx` — same pattern for CoverMarkdown
+
+2. `internal/web/templates/job_detail.html`:
+   - Resume section: replaced single PDF button with conditional multi-format group (MD + DOCX shown when `ResumeMarkdown != ""`; PDF only when `ResumePDF != ""`)
+   - Cover letter section: same pattern with `CoverMarkdown` and `CoverPDF`
+
+3. `internal/web/server_test.go`:
+   - Added `newJobWithMarkdown()` helper
+   - Added `TestDownloadResumeMarkdown` (3 subtests: success, empty markdown → 404, unknown job → 404)
+   - Added `TestDownloadCoverMarkdown` (3 subtests)
+   - Added `TestDownloadResumeDocx` (3 subtests: success verifies PK zip magic bytes, empty → 404, unknown → 404)
+   - Added `TestDownloadCoverDocx` (3 subtests)
+
+**Test results**: All 12 new tests pass. Pre-existing auth test failures (TestRequireAuth_Unauthenticated, TestRequireAuth_DeletedUser, TestIntegration_*) are present on the upstream branch and unrelated to this task.
+
+### Code Review Findings
+
+**Verdict: approve** — 0 critical, 1 warning, 2 info findings
+
+#### [WARNING] internal/web/server_test.go lines 1225, 1287 — potential panic in error message format
+
+In `TestDownloadResumeDocx` and `TestDownloadCoverDocx`, the check guards `len(body) < 2` but the `t.Errorf` format string accesses `body[:4]`. If `len(body)` is 0, 1, 2, or 3 (e.g. because the server returned an error response with a short body), the slice expression panics at test time instead of reporting a clean test failure. The check and the error message are inconsistent.
+
+Fix: change the guard to `len(body) < 4` or change the error format to `body` (full slice) and guard `len(body) < 2` separately from the format verb.
+
+Logged as BUG-013.
+
+#### [INFO] No test for exporter.ToDocx 500 error path
+
+The acceptance criterion "returns 500 on ToDocx error" is not covered by the test suite. The mock store cannot inject a `ToDocx` failure because the exporter is called directly (not via an interface). This is a known constraint of the current architecture (exporter is a pure function, not injectable). Coverage of this path would require either wrapping `exporter.ToDocx` behind an interface or using a build-tag approach.
+
+Not blocking — the happy-path and 404 paths are well tested and the 500 handler is a straightforward 2-line block. Noting for future improvement.
+
+#### [INFO] No user-isolation tests for new download endpoints
+
+The existing PDF download handlers (`TestDownloadResumePDF`, `TestDownloadCoverPDF`) also lack user-isolation test cases, so this is consistent with the existing pattern. However, now that four additional authenticated download routes exist, a future test pass should cover the scenario where user A tries to download a job belonging to user B (expects 404).
+
+Not blocking — the implementation correctly passes `userID` from context to `GetJob`, which enforces user scoping at the store layer. The pattern is verified by other endpoint isolation tests.
