@@ -1,6 +1,6 @@
 # Task: ui-minor-1-implementation
 
-- **Type**: coder
+- **Type**: code-reviewer
 - **Status**: done
 - **Repo**: .
 - **Parallel Group**: 1
@@ -220,3 +220,43 @@ Implementation complete on branch `feature/ui-minor-1-implementation`.
 
 ### Build/test note:
 Go is not installed in this container (used only in Docker build stage). Code changes were verified by visual review. `go build ./...` should be verified on a dev machine or in the Docker build pipeline.
+
+---
+
+## Code Review — ui-minor-1-implementation
+
+**Reviewer:** Code Reviewer agent
+**Date:** 2026-04-03
+**Verdict:** approve
+
+### Summary
+All acceptance criteria are met. Implementation is correct and follows the existing codebase patterns. Two low-severity informational findings noted below; neither blocks approval.
+
+### Acceptance Criteria Verification
+- [x] `internal/scraper/scheduler.go` exposes `Interval() time.Duration` method — confirmed at line 61
+- [x] `internal/web/server.go` has `scrapeInterval` field (line 124), `WithScrapeInterval` setter (lines 232-236), `NextScrapeAt time.Time` in `dashboardData` (line 408)
+- [x] `handleDashboard` computes and populates `NextScrapeAt` correctly (lines 445-449, 461)
+- [x] `cmd/jobhuntr/main.go` calls `.WithScrapeInterval(interval)` in builder chain (line 112)
+- [x] Countdown widget is inside `{{if .User}}` guard — not rendered for unauthenticated users (dashboard.html line 6-100)
+- [x] Zero-time case shows "Scrape running soon…" (dashboard.html line 40)
+- [x] Past-time case transitions to "any moment now" when diff reaches 0 (dashboard.html line 53)
+- [x] Footer added to layout.html before `</body>` with correct link, `target="_blank"`, `rel="noopener noreferrer"` (layout.html lines 54-56)
+- [x] CSS sections 17 (FOOTER) and 18 (SCRAPE COUNTDOWN) appended to app.css (lines 937-971)
+- [x] No new HTTP endpoints added
+
+### Findings
+
+#### [INFO] dashboard.html:59 — `setInterval` not cleared when countdown reaches zero
+When `diff === 0`, the `tick` function returns early (correctly showing "any moment now") but `setInterval` continues calling `tick` every second for the lifetime of the page. On a long-lived SPA-style session the timer accumulates but never clears. The impact is negligible — `tick` is a trivial closure and the page reloads on navigation — but could be tidied by storing the interval ID and calling `clearInterval` when `diff === 0`.
+
+No action required; info only.
+
+#### [INFO] `Interval()` method on `Scheduler` is not called in production path
+`cmd/jobhuntr/main.go` passes the raw `interval` variable (parsed from config) directly to `WithScrapeInterval(interval)` rather than calling `sched.Interval()`. The new `Interval()` method on `Scheduler` is currently dead code. This is not a bug — the values are identical — but the method may cause confusion about the intended usage pattern.
+
+No action required; the method was added per spec and may be useful for future callers (e.g. tests, admin endpoints).
+
+### Findings count
+- Critical: 0
+- Warning: 0
+- Info: 2
