@@ -7,8 +7,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/whinchman/jobhuntr/internal/models"
 )
+
+// ErrEmailTaken is returned by CreateUserWithPassword when the email address
+// is already registered.
+var ErrEmailTaken = errors.New("store: email already taken")
+
+// userSelectCols is the canonical column list used in every SELECT on users.
+// It must stay in sync with scanUser.
+const userSelectCols = `id, provider, provider_id, email, display_name, avatar_url,
+       resume_markdown, onboarding_complete, ntfy_topic, created_at, last_login_at,
+       password_hash, email_verified, email_verify_token, email_verify_expires_at,
+       reset_token, reset_expires_at`
 
 // ListActiveUserIDs returns the IDs of all users that have at least one
 // search filter configured. These are the users the scheduler should scrape
@@ -62,10 +74,8 @@ func (s *Store) UpsertUser(ctx context.Context, user *models.User) (*models.User
 
 // GetUser retrieves a user by primary key. Returns an error if not found.
 func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, provider, provider_id, email, display_name, avatar_url,
-		       resume_markdown, onboarding_complete, ntfy_topic, created_at, last_login_at
-		FROM users WHERE id = $1`, id)
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE id = $1", id)
 
 	u, err := scanUser(row)
 	if err != nil {
@@ -80,10 +90,9 @@ func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
 // GetUserByProvider retrieves a user by provider name and provider-specific
 // ID. Returns an error if not found.
 func (s *Store) GetUserByProvider(ctx context.Context, provider, providerID string) (*models.User, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, provider, provider_id, email, display_name, avatar_url,
-		       resume_markdown, onboarding_complete, ntfy_topic, created_at, last_login_at
-		FROM users WHERE provider = $1 AND provider_id = $2`, provider, providerID)
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE provider = $1 AND provider_id = $2",
+		provider, providerID)
 
 	u, err := scanUser(row)
 	if err != nil {
@@ -91,6 +100,127 @@ func (s *Store) GetUserByProvider(ctx context.Context, provider, providerID stri
 			return nil, fmt.Errorf("store: user %s/%s not found", provider, providerID)
 		}
 		return nil, fmt.Errorf("store: get user by provider: %w", err)
+	}
+	return u, nil
+}
+
+// GetUserByEmail retrieves a user by email address. Returns nil, nil (no
+// error) when not found so callers can time-equalize before responding.
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE email = $1", email)
+
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: get user by email: %w", err)
+	}
+	return u, nil
+}
+
+// CreateUserWithPassword inserts a new email/password user with
+// email_verified=0 and the supplied verification token. Returns ErrEmailTaken
+// if the email address is already registered.
+func (s *Store) CreateUserWithPassword(ctx context.Context, email, displayName, passwordHash, verifyToken string, verifyExpiresAt time.Time) (*models.User, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO users
+		  (provider, provider_id, email, display_name, avatar_url, resume_markdown,
+		   onboarding_complete, last_login_at,
+		   password_hash, email_verified, email_verify_token, email_verify_expires_at)
+		VALUES ('email', '', $1, $2, '', '', 0, $3, $4, 0, $5, $6)
+		RETURNING id`,
+		email, displayName, now,
+		passwordHash, verifyToken, verifyExpiresAt.UTC().Format(time.RFC3339),
+	).Scan(&id)
+	if err != nil {
+		// Unique constraint violation on email.
+		if isUniqueViolation(err) {
+			return nil, ErrEmailTaken
+		}
+		return nil, fmt.Errorf("store: create user with password: %w", err)
+	}
+
+	return s.GetUser(ctx, id)
+}
+
+// SetResetToken stores a password-reset token for the given user.
+func (s *Store) SetResetToken(ctx context.Context, userID int64, token string, expiresAt time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET reset_token = $2, reset_expires_at = $3 WHERE id = $1",
+		userID, token, expiresAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("store: set reset token: %w", err)
+	}
+	return nil
+}
+
+// ConsumeResetToken atomically validates the token, updates the password hash,
+// and clears the token. Returns nil, nil if the token is not found or expired.
+func (s *Store) ConsumeResetToken(ctx context.Context, token string, newPasswordHash string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"UPDATE users SET password_hash = $2, reset_token = NULL, reset_expires_at = NULL WHERE reset_token = $1 AND reset_expires_at > NOW() RETURNING "+userSelectCols,
+		token, newPasswordHash,
+	)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: consume reset token: %w", err)
+	}
+	return u, nil
+}
+
+// SetEmailVerifyToken stores an email verification token for the given user.
+func (s *Store) SetEmailVerifyToken(ctx context.Context, userID int64, token string, expiresAt time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET email_verify_token = $2, email_verify_expires_at = $3 WHERE id = $1",
+		userID, token, expiresAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("store: set email verify token: %w", err)
+	}
+	return nil
+}
+
+// ConsumeVerifyToken atomically validates the token, marks the email as
+// verified, and clears the token. Returns nil, nil if the token is not found
+// or expired.
+func (s *Store) ConsumeVerifyToken(ctx context.Context, token string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"UPDATE users SET email_verified = 1, email_verify_token = NULL, email_verify_expires_at = NULL WHERE email_verify_token = $1 AND email_verify_expires_at > NOW() RETURNING "+userSelectCols,
+		token,
+	)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: consume verify token: %w", err)
+	}
+	return u, nil
+}
+
+// GetUserByResetToken retrieves a user whose reset_token matches and whose
+// reset_expires_at is in the future. Returns nil, nil when not found or expired.
+// This method does NOT consume (clear) the token.
+func (s *Store) GetUserByResetToken(ctx context.Context, token string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE reset_token = $1 AND reset_expires_at > NOW()",
+		token,
+	)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: get user by reset token: %w", err)
 	}
 	return u, nil
 }
@@ -239,25 +369,61 @@ func (s *Store) UpdateUserNtfyTopic(ctx context.Context, userID int64, topic str
 }
 
 // scanUser scans a single user row into a models.User.
+// Column order must match userSelectCols exactly.
 func scanUser(s scanner) (*models.User, error) {
 	var u models.User
 	var createdAt, lastLoginAt string
-	var onboardingComplete int
+	var onboardingComplete, emailVerified int
+	var passwordHash sql.NullString
+	var emailVerifyToken sql.NullString
+	var emailVerifyExpiresAt sql.NullString
+	var resetToken sql.NullString
+	var resetExpiresAt sql.NullString
+
 	err := s.Scan(
 		&u.ID, &u.Provider, &u.ProviderID, &u.Email,
 		&u.DisplayName, &u.AvatarURL, &u.ResumeMarkdown,
 		&onboardingComplete, &u.NtfyTopic, &createdAt, &lastLoginAt,
+		&passwordHash, &emailVerified, &emailVerifyToken, &emailVerifyExpiresAt,
+		&resetToken, &resetExpiresAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+
 	u.OnboardingComplete = onboardingComplete != 0
+	u.EmailVerified = emailVerified != 0
+
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		u.CreatedAt = t
 	}
 	if t, err := time.Parse(time.RFC3339, lastLoginAt); err == nil {
 		u.LastLoginAt = t
 	}
+
+	if passwordHash.Valid {
+		v := passwordHash.String
+		u.PasswordHash = &v
+	}
+	if emailVerifyToken.Valid {
+		v := emailVerifyToken.String
+		u.EmailVerifyToken = &v
+	}
+	if emailVerifyExpiresAt.Valid {
+		if t, err := time.Parse(time.RFC3339, emailVerifyExpiresAt.String); err == nil {
+			u.EmailVerifyExpiresAt = &t
+		}
+	}
+	if resetToken.Valid {
+		v := resetToken.String
+		u.ResetToken = &v
+	}
+	if resetExpiresAt.Valid {
+		if t, err := time.Parse(time.RFC3339, resetExpiresAt.String); err == nil {
+			u.ResetExpiresAt = &t
+		}
+	}
+
 	return &u, nil
 }
 
@@ -276,4 +442,14 @@ func scanUserFilter(s scanner) (*models.UserSearchFilter, error) {
 		f.CreatedAt = t
 	}
 	return &f, nil
+}
+
+// isUniqueViolation returns true if err is a PostgreSQL unique constraint
+// violation (SQLSTATE 23505).
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }

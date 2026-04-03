@@ -15,6 +15,7 @@ import (
 
 	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/generator"
+	"github.com/whinchman/jobhuntr/internal/mailer"
 	"github.com/whinchman/jobhuntr/internal/notifier"
 	"github.com/whinchman/jobhuntr/internal/pdf"
 	"github.com/whinchman/jobhuntr/internal/scraper"
@@ -96,9 +97,19 @@ func main() {
 	claudeGen := generator.NewAnthropicGenerator(cfg.Claude.APIKey, cfg.Claude.Model)
 	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, cfg.Resume.Path, 30*time.Second, logger)
 
+	// Construct and inject the mailer. Falls back to NoopMailer if SMTP is not configured.
+	var m web.EmailSender
+	if cfg.SMTP.Host != "" {
+		m = mailer.NewSMTPMailer(cfg.SMTP.Host, cfg.SMTP.Port, cfg.SMTP.Username, cfg.SMTP.Password, cfg.SMTP.From)
+	} else {
+		slog.Warn("SMTP not configured — emails will be dropped (NoopMailer)")
+		m = &mailer.NoopMailer{}
+	}
+
 	// Start HTTP server.
 	webSrv := web.NewServerWithConfig(db, db, db, cfg).
-		WithLastScrapeFn(sched.LastScrapeAt)
+		WithLastScrapeFn(sched.LastScrapeAt).
+		WithMailer(m)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: webSrv.Handler(),

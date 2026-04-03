@@ -1,3 +1,4 @@
+{{define "login.html"}}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,30 +16,47 @@
     </header>
 
     {{if .Flash}}
-    <div role="alert" class="alert alert-info">
-      <p>{{.Flash}}</p>
-    </div>
+    <div class="alert alert-danger" role="alert">{{.Flash}}</div>
+    {{end}}
+    {{if .FlashSuccess}}
+    <div class="alert alert-success" role="alert">{{.FlashSuccess}}</div>
     {{end}}
 
-    <div class="providers-section">
-      {{range .Providers}}
-        {{if eq . "google"}}
-          <a href="/auth/google" role="button" class="provider-btn provider-btn-google"
-             onclick="this.setAttribute('aria-busy','true'); this.setAttribute('aria-label','Signing in with Google\u2026');">
-            Sign in with Google
-          </a>
-        {{end}}
-        {{if eq . "github"}}
-          <a href="/auth/github" role="button" class="provider-btn provider-btn-github"
-             onclick="this.setAttribute('aria-busy','true'); this.setAttribute('aria-label','Signing in with GitHub\u2026');">
-            Sign in with GitHub
-          </a>
-        {{end}}
-      {{end}}
-      {{if eq (len .Providers) 0}}
-        <p><em>No OAuth providers are configured.</em></p>
-      {{end}}
-    </div>
+    <form method="post" action="/login">
+      <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+
+      <label for="email">
+        Email address
+        <input id="email" type="email" name="email" autocomplete="email"
+               placeholder="you@example.com" required autofocus
+               value="{{.Email}}"
+               {{if .Flash}}aria-invalid="true"{{end}}>
+      </label>
+
+      <label for="password">
+        Password
+        <span class="login-forgot-link">
+          <a href="/forgot-password">Forgot password?</a>
+        </span>
+        <input id="password" type="password" name="password" autocomplete="current-password"
+               placeholder="••••••••" required
+               {{if .Flash}}aria-invalid="true"{{end}}>
+      </label>
+
+      <button type="submit">Sign in</button>
+    </form>
+
+    {{if .Providers}}
+    <div class="login-divider"><span>or</span></div>
+    {{range .Providers}}
+    <a href="/auth/{{.}}" role="button" class="outline">Continue with {{.}}</a>
+    {{end}}
+    {{end}}
+
+    <footer class="login-card-footer">
+      <p>Don't have an account? <a href="/register">Create one</a></p>
+    </footer>
   </article>
 </body>
 </html>
+{{end}}
