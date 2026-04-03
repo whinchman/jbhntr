@@ -36,6 +36,9 @@ func main() {
 
 	dsn := cfg.Database.URL
 	if dsn == "" {
+		dsn = os.Getenv("DATABASE_URL")
+	}
+	if dsn == "" {
 		slog.Error("database.url is not set in config; set DATABASE_URL environment variable")
 		os.Exit(1)
 	}
