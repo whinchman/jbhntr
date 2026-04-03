@@ -8,6 +8,58 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-016: [email-auth] SMTPMailer sends HTML email with Content-Type: text/plain
+
+- File: `internal/mailer/mailer.go`, line 88
+- Severity: warning
+- Description: `SMTPMailer.SendMail` hardcodes `Content-Type: text/plain; charset=UTF-8` in the MIME headers but the email body passed to it is a rendered HTML document (from `templates/email/verify_email.html` and `templates/email/reset_password.html`). Most email clients will render the HTML as raw escaped text rather than rendered HTML. Users will see `<h1>` tags and inline styles in the email body instead of a rendered button.
+- Reproduction: Configure SMTP, register a new user, inspect the verification email received — the body is shown as raw HTML source.
+- Fix: Change the `Content-Type` header in `SMTPMailer.SendMail` from `text/plain` to `text/html`:
+  ```go
+  msg := fmt.Sprintf(
+      "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+      m.from, to, subject, body,
+  )
+  ```
+
+---
+
+## BUG-017: [email-auth] isUniqueViolation uses fragile string matching instead of pgx error type
+
+- File: `internal/store/user.go`, line 449–451
+- Severity: warning
+- Description: `isUniqueViolation` detects PostgreSQL unique constraint violations by calling `strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "unique")`. The second clause (`"unique"`) is overly broad — it would match any error message containing the word "unique" (e.g., a constraint named "unique_user_email" in an unrelated error message). The correct approach with pgx/v5 is to use the typed error: `var pgErr *pgconn.PgError; errors.As(err, &pgErr) && pgErr.Code == "23505"`. This is both precise and resistant to error-message formatting changes.
+- Reproduction: N/A (latent — currently works but fragile).
+- Fix: Import `github.com/jackc/pgx/v5/pgconn` and replace the string-matching implementation with:
+  ```go
+  func isUniqueViolation(err error) bool {
+      var pgErr *pgconn.PgError
+      return errors.As(err, &pgErr) && pgErr.Code == "23505"
+  }
+  ```
+
+---
+
+## BUG-018: [email-auth] migrate_test.go does not include migration 009
+
+- File: `internal/store/migrate_test.go` (line count of expected slice)
+- Severity: warning
+- Description: The existing `TestMigrate/applies_all_migrations` test (BUG-014 noted migration 008 was missing) will also be missing `009_add_email_auth.sql` now that that migration has been added. When `TEST_DATABASE_URL` is set the test will fail with `migrations applied = 9, want N` (where N is the hardcoded expected count).
+- Reproduction: Set `TEST_DATABASE_URL`, run `go test ./internal/store/... -run TestMigrate`.
+- Fix: Add `"009_add_email_auth.sql"` to the `expected` slice in `TestMigrate`.
+
+---
+
+## BUG-019: [email-auth] CSS duplicate definition — .login-card-footer defined twice in app.css
+
+- File: `internal/web/templates/static/app.css`, lines 628–708 (Section 12) and lines 801–874 (Section 12 additions)
+- Severity: info
+- Description: The login page CSS is split into two blocks both labelled "Section 12". The first block (lines 628–708) defines `.login-card`, `.login-card-header`, `.provider-btn`, etc. The second block (lines 801–874, labelled "Section 12 — LOGIN PAGE additions") re-defines `.login-card-footer`, `.login-forgot-link`, `.field-error`, `.verify-email-body`, and the responsive breakpoint. The `.login-card-footer` rules in particular appear in both blocks (the second block overrides the first). While this produces correct final output due to CSS cascade, the duplication is confusing and should be consolidated into one Section 12 block.
+- Reproduction: N/A (visual/cosmetic).
+- Fix: Merge the "Section 12 — LOGIN PAGE additions" block into the original "12. LOGIN PAGE" block and remove the duplicate `.login-card-footer` definition from the first block.
+
+---
+
 ## BUG-014: migrate_test.go hardcodes 7 migrations but migration 008 now exists
 
 **Severity:** Warning (test failure — will break `go test ./internal/store/...` on a live DB)
