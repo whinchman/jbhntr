@@ -208,7 +208,7 @@ func setSessionCookie(t *testing.T, ts *httptest.Server, userID int64) *http.Coo
 // ─── tests ──────────────────────────────────────────────────────────────────
 
 func TestRequireAuth_Unauthenticated(t *testing.T) {
-	t.Run("unauthenticated request redirects to /login", func(t *testing.T) {
+	t.Run("unauthenticated request to protected route redirects to /login", func(t *testing.T) {
 		us := newMockUserStore()
 		ts := newAuthServer(t, us)
 		defer ts.Close()
@@ -218,9 +218,11 @@ func TestRequireAuth_Unauthenticated(t *testing.T) {
 			return http.ErrUseLastResponse
 		}
 
-		resp, err := client.Get(ts.URL + "/")
+		// /settings is a requireAuth route; / is optionalAuth and intentionally
+		// returns 200 to unauthenticated visitors.
+		resp, err := client.Get(ts.URL + "/settings")
 		if err != nil {
-			t.Fatalf("GET /: %v", err)
+			t.Fatalf("GET /settings: %v", err)
 		}
 		defer resp.Body.Close()
 
@@ -615,9 +617,10 @@ func TestHandleOAuthCallback_ProviderError(t *testing.T) {
 }
 
 func TestRequireAuth_DeletedUser(t *testing.T) {
-	t.Run("session referencing non-existent user redirects to /login", func(t *testing.T) {
+	t.Run("session referencing non-existent user redirects to /login on protected route", func(t *testing.T) {
 		// Create mock store with NO users — the session will reference user 99
-		// which does not exist.
+		// which does not exist. On a requireAuth route this must redirect to /login.
+		// (On an optionalAuth route like / it returns 200 as an anonymous visitor.)
 		us := newMockUserStore()
 		ts := newAuthServer(t, us)
 		defer ts.Close()
@@ -629,12 +632,12 @@ func TestRequireAuth_DeletedUser(t *testing.T) {
 			return http.ErrUseLastResponse
 		}
 
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/settings", nil)
 		req.AddCookie(cookie)
 
 		resp, err := client.Do(req)
 		if err != nil {
-			t.Fatalf("GET /: %v", err)
+			t.Fatalf("GET /settings: %v", err)
 		}
 		defer resp.Body.Close()
 
