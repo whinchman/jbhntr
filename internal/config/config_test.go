@@ -136,3 +136,103 @@ func TestLoad(t *testing.T) {
 		}
 	})
 }
+
+func TestSMTPConfig(t *testing.T) {
+	t.Run("parses smtp fields correctly", func(t *testing.T) {
+		yaml := `
+smtp:
+  host: "smtp.example.com"
+  port: 587
+  username: "user@example.com"
+  password: "secret"
+  from: "noreply@example.com"
+`
+		path := writeTemp(t, yaml)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.SMTP.Host != "smtp.example.com" {
+			t.Errorf("SMTP.Host = %q, want %q", cfg.SMTP.Host, "smtp.example.com")
+		}
+		if cfg.SMTP.Port != 587 {
+			t.Errorf("SMTP.Port = %d, want 587", cfg.SMTP.Port)
+		}
+		if cfg.SMTP.Username != "user@example.com" {
+			t.Errorf("SMTP.Username = %q, want %q", cfg.SMTP.Username, "user@example.com")
+		}
+		if cfg.SMTP.Password != "secret" {
+			t.Errorf("SMTP.Password = %q, want %q", cfg.SMTP.Password, "secret")
+		}
+		if cfg.SMTP.From != "noreply@example.com" {
+			t.Errorf("SMTP.From = %q, want %q", cfg.SMTP.From, "noreply@example.com")
+		}
+	})
+
+	t.Run("smtp block absent yields zero value (no panic)", func(t *testing.T) {
+		path := writeTemp(t, "server:\n  port: 8080\n")
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.SMTP.Host != "" {
+			t.Errorf("SMTP.Host = %q, want empty string when smtp block absent", cfg.SMTP.Host)
+		}
+		if cfg.SMTP.Port != 0 {
+			t.Errorf("SMTP.Port = %d, want 0 when smtp block absent", cfg.SMTP.Port)
+		}
+	})
+}
+
+func TestOAuthConfig(t *testing.T) {
+	t.Run("oauth.enabled true is parsed", func(t *testing.T) {
+		yaml := `
+auth:
+  session_secret: "mysecret"
+  oauth:
+    enabled: true
+  providers:
+    google:
+      client_id: "gid"
+      client_secret: "gsecret"
+`
+		path := writeTemp(t, yaml)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if !cfg.Auth.OAuth.Enabled {
+			t.Errorf("Auth.OAuth.Enabled = false, want true")
+		}
+		// Ensure existing fields are unchanged.
+		if cfg.Auth.SessionSecret != "mysecret" {
+			t.Errorf("Auth.SessionSecret = %q, want %q", cfg.Auth.SessionSecret, "mysecret")
+		}
+		if cfg.Auth.Providers.Google.ClientID != "gid" {
+			t.Errorf("Auth.Providers.Google.ClientID = %q, want %q", cfg.Auth.Providers.Google.ClientID, "gid")
+		}
+	})
+
+	t.Run("oauth.enabled defaults to false when absent", func(t *testing.T) {
+		yaml := `
+auth:
+  session_secret: "mysecret"
+  providers:
+    github:
+      client_id: "ghid"
+      client_secret: "ghsecret"
+`
+		path := writeTemp(t, yaml)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.Auth.OAuth.Enabled {
+			t.Errorf("Auth.OAuth.Enabled = true, want false when oauth block absent")
+		}
+		// Ensure existing fields are unchanged.
+		if cfg.Auth.Providers.GitHub.ClientID != "ghid" {
+			t.Errorf("Auth.Providers.GitHub.ClientID = %q, want %q", cfg.Auth.Providers.GitHub.ClientID, "ghid")
+		}
+	})
+}
