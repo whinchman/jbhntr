@@ -247,3 +247,42 @@ func TestListJobsByApplicationStatus(t *testing.T) {
 		}
 	})
 }
+
+// ─── UpdateApplicationStatus: user scoping ────────────────────────────────────
+
+// TestUpdateApplicationStatus_UserScoping verifies that UpdateApplicationStatus
+// enforces user ownership: a second user cannot update a job that belongs to
+// the first user. The store uses GetJob internally, which scopes by user_id,
+// so the call must return an error and leave the job unchanged.
+func TestUpdateApplicationStatus_UserScoping(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	owner, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "scope-u1", Email: "scope1@test.com"})
+	if err != nil {
+		t.Fatalf("UpsertUser owner error = %v", err)
+	}
+
+	attacker, err := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "scope-u2", Email: "scope2@test.com"})
+	if err != nil {
+		t.Fatalf("UpsertUser attacker error = %v", err)
+	}
+
+	// Create an approved job owned by owner.
+	j := approvedJob(t, s, owner.ID, "scope-isolation-1")
+
+	// attacker attempts to update the owner's job — must fail.
+	err = s.UpdateApplicationStatus(ctx, attacker.ID, j.ID, models.AppStatusApplied)
+	if err == nil {
+		t.Error("UpdateApplicationStatus should return an error when userID does not match job owner")
+	}
+
+	// Confirm the job is unchanged.
+	got, err := s.GetJob(ctx, owner.ID, j.ID)
+	if err != nil {
+		t.Fatalf("GetJob error = %v", err)
+	}
+	if got.ApplicationStatus != "" {
+		t.Errorf("ApplicationStatus = %q, want empty (unchanged after cross-user attempt)", got.ApplicationStatus)
+	}
+}
