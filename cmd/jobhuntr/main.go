@@ -71,12 +71,16 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start PDF converter and background worker.
-	pdfConverter, err := pdf.NewRodConverter()
-	if err != nil {
-		slog.Error("failed to start PDF converter", "error", err)
-		os.Exit(1)
+	// PDF conversion is optional — if the converter fails to start (e.g. no
+	// browser available in the environment), we log a warning and continue
+	// with pdfConverter=nil so the worker skips PDF generation gracefully.
+	var pdfConverter pdf.Converter
+	if rc, err := pdf.NewRodConverter(); err != nil {
+		slog.Warn("pdf converter unavailable, PDF generation will be skipped", "error", err)
+	} else {
+		pdfConverter = rc
+		defer rc.Close()
 	}
-	defer pdfConverter.Close()
 
 	claudeGen := generator.NewAnthropicGenerator(cfg.Claude.APIKey, cfg.Claude.Model)
 	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, cfg.Resume.Path, 30*time.Second, logger)
