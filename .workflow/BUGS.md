@@ -8,6 +8,42 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-026: [job-pipeline] mockJobStore.ListJobs does not filter by ApplicationStatus
+
+- File: `internal/web/server_test.go`, lines 51–65
+- Severity: warning (test correctness — silently returns wrong results)
+- Branch: feature/job-pipeline-2-models-store
+- Description: `mockJobStore.ListJobs` correctly filters by `f.Status` but does not check `f.ApplicationStatus`. Any web-layer test that passes a non-empty `ApplicationStatus` in `ListJobsFilter` will receive unfiltered results instead of the expected subset. Currently no test exercises this path via the mock, but the gap will produce silent false-positives if such tests are added.
+- Reproduction: Write a web handler test that calls `ListJobs` with `ListJobsFilter{ApplicationStatus: models.AppStatusApplied}` against `mockJobStore` populated with jobs of mixed statuses. Observe that all jobs are returned regardless of their `ApplicationStatus`.
+- Fix: Add the missing filter clause inside `mockJobStore.ListJobs`:
+  ```go
+  if f.ApplicationStatus != "" && j.ApplicationStatus != f.ApplicationStatus {
+      continue
+  }
+  ```
+
+---
+
+## BUG-025: [job-pipeline] UpdateApplicationStatus does not support userID == 0 worker path
+
+- File: `internal/store/store.go`, line ~351 (`WHERE id = $2 AND user_id = $3`)
+- Severity: warning (pattern inconsistency; currently safe, latent risk for future callers)
+- Branch: feature/job-pipeline-2-models-store
+- Description: Every other mutating store method (`UpdateJobStatus`, `UpdateJobSummary`, `UpdateJobError`, `UpdateJobGenerated`) handles `userID == 0` by omitting the `AND user_id = $N` WHERE clause so background workers can update any job. `UpdateApplicationStatus` always includes `AND user_id = $3`, so a call with `userID=0` silently matches only legacy rows where `user_id = 0`. No background worker currently calls this method, but the inconsistency creates a correctness trap if a future worker or admin path uses it.
+- Reproduction: Call `store.UpdateApplicationStatus(ctx, 0, jobID, models.AppStatusApplied)` where the job has `user_id > 0`. The UPDATE matches zero rows and returns nil — a silent no-op rather than the expected success.
+- Fix: Follow the existing pattern:
+  ```go
+  query := `UPDATE jobs SET ... WHERE id = $2`
+  args := []any{string(status), jobID}
+  if userID != 0 {
+      query += ` AND user_id = $3`
+      args = append(args, userID)
+  }
+  ```
+  Or add a doc comment explicitly stating that `userID == 0` is not supported by design for this method.
+
+---
+
 ## BUG-024: [job-pipeline] migrate_test.go job-INSERT subtests not idempotent on repeated runs
 
 - File: `internal/store/migrate_test.go`, lines 97–139
