@@ -72,6 +72,40 @@ Consult the godocx README/examples at `go doc github.com/gomutex/godocx` for the
 
 ## Notes
 
+### Code Review (Code Reviewer Agent)
+
+**Verdict**: approve (with one warning filed as BUG-012)
+
+**Findings summary**: 0 critical, 1 warning, 2 info
+
+#### [WARNING] internal/exporter/docx.go:parseInline — underscore treated as italic delimiter even inside words
+
+`parseInline` treats any `_` as the start of an italic span and searches forward for the next `_`. This means prose containing underscores in technical identifiers (e.g. `node_modules`, `role_arn`, `secret_access_key`) will be partially italicised. Example: `"node_modules, my_project"` → "modules, my" rendered italic. This is a real-world hazard for resume content that lists technical skills or environment variable names with underscores.
+
+Affected file/line: `internal/exporter/docx.go:133–141`
+
+Filed as BUG-012.
+
+Fix suggestion: Only treat `_` as an italic delimiter when it appears at a word boundary (preceded by a space, start-of-string, or punctuation, and followed by a non-space character). The simplest approach: check `i == 0 || text[i-1] == ' '` before treating `_` as opening italic.
+
+#### [INFO] internal/exporter/docx.go:51,55,60 — AddHeading errors silently discarded
+
+`_, _ = doc.AddHeading(...)` discards errors. For heading levels 1–3, `AddHeading` never errors (it only errors for level > 9), so this is safe today. If the calling code ever used a variable level, silent discard could hide bugs. Not a current issue.
+
+#### [INFO] internal/exporter/docx.go:69-70 — AddParagraph("") emits an empty run before addInlineRuns adds content runs
+
+`doc.AddParagraph("")` internally calls `p.AddText("")`, adding an empty run to the paragraph before `addInlineRuns` appends the actual content. The empty run is harmless (zero-length text element in the XML) but wastes space. Could use `newParagraph` directly if the API allowed it; not currently possible with the godocx public API.
+
+#### No regressions to task-1 files
+
+The diff on this branch (vs `feature/resume-export-1-foundation`) is limited to `internal/exporter/docx.go`, `internal/exporter/docx_test.go`, and `go.mod`/`go.sum`. No task-1 files (models, store, generator, worker) were modified.
+
+#### BUG-011 resolved
+
+BUG-011 (godocx added as unused indirect dependency) is resolved by this task: `gomutex/godocx` is now a direct dependency actively imported by `internal/exporter/docx.go`. `go mod tidy` produces no changes on this branch.
+
+---
+
 ### Implementation Summary (Coder Agent)
 
 **Branch**: `feature/resume-export-2-exporter` (branched from `feature/resume-export-1-foundation`)

@@ -8,6 +8,31 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-012: parseInline treats `_` as italic delimiter inside words, corrupting identifiers with underscores
+
+**Severity:** Warning
+**File:** `internal/exporter/docx.go`, lines 133–141
+**Found by:** Code Reviewer agent (resume-export-2-exporter review)
+**Branch:** feature/resume-export-2-exporter
+
+### Description
+
+`parseInline` does not check word boundaries before treating `_` as an italic delimiter. It searches for any subsequent `_` and treats the text between them as italic. This silently italicises portions of plain text that happen to contain two underscores, which is common in technical resume content (package names, environment variables, CLI flags, etc.).
+
+### Reproduction
+
+Call `parseInline("Technologies: node_modules, my_project")`. The result contains an italic span with text `"modules, my"`. The text `"node"` and `"_project"` are rendered as plain text; `"modules, my"` is rendered italic. The DOCX output will display `"Technologies: node_` *modules, my* `_project"`.
+
+Similar examples:
+- `"role_arn and secret_access_key"` → "arn and secret" italicised
+- `"snake_case_name"` → "case" italicised
+
+### Fix
+
+Before treating `_` at position `i` as an opening italic delimiter, verify it is at a word boundary. Simplest approach: add a guard `i == 0 || !isAlphaNum(text[i-1])` where `isAlphaNum` checks `(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')`. This matches common Markdown rules (CommonMark requires that `_`-delimiters cannot be left-flanking when preceded by a Unicode alphanumeric character).
+
+---
+
 ## BUG-011: godocx added as unused indirect dependency — will be stripped by go mod tidy
 
 **Severity:** Warning
