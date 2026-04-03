@@ -1,7 +1,7 @@
 # Task: ui-minor-1-implementation
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Repo**: .
 - **Parallel Group**: 1
 - **Branch**: feature/ui-minor-1-implementation
@@ -208,3 +208,15 @@ not have a `not` function — use nested `{{if}}` / `{{else}}` as shown above.
 
 ## Notes
 
+Implementation complete on branch `feature/ui-minor-1-implementation`.
+
+### Changes made:
+- `internal/scraper/scheduler.go`: Added `Interval() time.Duration` method after `LastScrapeAt()`
+- `internal/web/server.go`: Added `scrapeInterval time.Duration` field, `WithScrapeInterval(d time.Duration) *Server` setter, `NextScrapeAt time.Time` to `dashboardData` struct, and logic in `handleDashboard` to compute `nextScrape = lastScrapeAt + interval`
+- `cmd/jobhuntr/main.go`: Added `.WithScrapeInterval(interval)` to the web server builder chain
+- `internal/web/templates/dashboard.html`: Inserted countdown widget block between search input and job table div, inside existing `{{if .User}}` guard
+- `internal/web/templates/layout.html`: Added `<footer class="app-footer">` before `</body>`
+- `internal/web/templates/static/app.css`: Appended sections 17 (FOOTER) and 18 (SCRAPE COUNTDOWN)
+
+### Build/test note:
+Go is not installed in this container (used only in Docker build stage). Code changes were verified by visual review. `go build ./...` should be verified on a dev machine or in the Docker build pipeline.
