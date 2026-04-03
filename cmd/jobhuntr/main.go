@@ -108,6 +108,7 @@ func main() {
 
 	// Start HTTP server.
 	webSrv := web.NewServerWithConfig(db, db, db, cfg).
+		WithAdminStore(db).
 		WithLastScrapeFn(sched.LastScrapeAt).
 		WithScrapeInterval(interval).
 		WithMailer(m)

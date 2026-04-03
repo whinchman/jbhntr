@@ -20,7 +20,7 @@ var ErrEmailTaken = errors.New("store: email already taken")
 const userSelectCols = `id, provider, provider_id, email, display_name, avatar_url,
        resume_markdown, onboarding_complete, ntfy_topic, created_at, last_login_at,
        password_hash, email_verified, email_verify_token, email_verify_expires_at,
-       reset_token, reset_expires_at`
+       reset_token, reset_expires_at, banned_at`
 
 // ListActiveUserIDs returns the IDs of all users that have at least one
 // search filter configured. These are the users the scheduler should scrape
@@ -379,13 +379,14 @@ func scanUser(s scanner) (*models.User, error) {
 	var emailVerifyExpiresAt sql.NullString
 	var resetToken sql.NullString
 	var resetExpiresAt sql.NullString
+	var bannedAt sql.NullString
 
 	err := s.Scan(
 		&u.ID, &u.Provider, &u.ProviderID, &u.Email,
 		&u.DisplayName, &u.AvatarURL, &u.ResumeMarkdown,
 		&onboardingComplete, &u.NtfyTopic, &createdAt, &lastLoginAt,
 		&passwordHash, &emailVerified, &emailVerifyToken, &emailVerifyExpiresAt,
-		&resetToken, &resetExpiresAt,
+		&resetToken, &resetExpiresAt, &bannedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -423,6 +424,11 @@ func scanUser(s scanner) (*models.User, error) {
 			u.ResetExpiresAt = &t
 		}
 	}
+	if bannedAt.Valid {
+		if t, err := time.Parse(time.RFC3339, bannedAt.String); err == nil {
+			u.BannedAt = &t
+		}
+	}
 
 	return &u, nil
 }
@@ -442,6 +448,98 @@ func scanUserFilter(s scanner) (*models.UserSearchFilter, error) {
 		f.CreatedAt = t
 	}
 	return &f, nil
+}
+
+// AdminFilter is a UserSearchFilter joined with the owning user's email,
+// used by admin list-all-filters views.
+type AdminFilter struct {
+	models.UserSearchFilter
+	UserEmail string
+}
+
+// ListAllUsers returns all users ordered by created_at DESC.
+// It reuses userSelectCols and scanUser to stay in sync with the column list.
+func (s *Store) ListAllUsers(ctx context.Context) ([]models.User, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+userSelectCols+" FROM users ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("store: list all users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: list all users scan: %w", err)
+		}
+		users = append(users, *u)
+	}
+	return users, rows.Err()
+}
+
+// BanUser sets banned_at = NOW() for the given user.
+func (s *Store) BanUser(ctx context.Context, userID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET banned_at = NOW() WHERE id = $1", userID)
+	if err != nil {
+		return fmt.Errorf("store: ban user: %w", err)
+	}
+	return nil
+}
+
+// UnbanUser clears banned_at for the given user.
+func (s *Store) UnbanUser(ctx context.Context, userID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET banned_at = NULL WHERE id = $1", userID)
+	if err != nil {
+		return fmt.Errorf("store: unban user: %w", err)
+	}
+	return nil
+}
+
+// SetPasswordHash updates the password hash for the given user and clears any
+// outstanding reset token so old tokens cannot be reused after an admin reset.
+func (s *Store) SetPasswordHash(ctx context.Context, userID int64, hash string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET password_hash = $1, reset_token = NULL, reset_expires_at = NULL WHERE id = $2",
+		hash, userID)
+	if err != nil {
+		return fmt.Errorf("store: set password hash: %w", err)
+	}
+	return nil
+}
+
+// ListAllFilters returns all user search filters joined with the owning user's
+// email, ordered by created_at DESC.
+func (s *Store) ListAllFilters(ctx context.Context) ([]AdminFilter, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT usf.id, usf.user_id, usf.keywords, usf.location, usf.min_salary, usf.max_salary, usf.title, usf.created_at, u.email
+		FROM user_search_filters usf
+		JOIN users u ON u.id = usf.user_id
+		ORDER BY usf.created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list all filters: %w", err)
+	}
+	defer rows.Close()
+
+	var filters []AdminFilter
+	for rows.Next() {
+		var f AdminFilter
+		var createdAt string
+		err := rows.Scan(
+			&f.ID, &f.UserID, &f.Keywords, &f.Location,
+			&f.MinSalary, &f.MaxSalary, &f.Title, &createdAt, &f.UserEmail,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("store: list all filters scan: %w", err)
+		}
+		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			f.CreatedAt = t
+		}
+		filters = append(filters, f)
+	}
+	return filters, rows.Err()
 }
 
 // isUniqueViolation returns true if err is a PostgreSQL unique constraint

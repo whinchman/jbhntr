@@ -78,6 +78,34 @@ CREATE TABLE IF NOT EXISTS scrape_runs (
 );
 `
 
+// AdminStats holds site-wide aggregate counts used by the admin dashboard.
+type AdminStats struct {
+	TotalUsers     int
+	TotalJobs      int
+	TotalFilters   int
+	NewUsersLast7d int
+}
+
+// GetAdminStats returns site-wide aggregate counts via four scalar queries.
+func (s *Store) GetAdminStats(ctx context.Context) (AdminStats, error) {
+	var st AdminStats
+
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&st.TotalUsers); err != nil {
+		return st, fmt.Errorf("store: admin stats total users: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs").Scan(&st.TotalJobs); err != nil {
+		return st, fmt.Errorf("store: admin stats total jobs: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_search_filters").Scan(&st.TotalFilters); err != nil {
+		return st, fmt.Errorf("store: admin stats total filters: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '7 days'").Scan(&st.NewUsersLast7d); err != nil {
+		return st, fmt.Errorf("store: admin stats new users last 7d: %w", err)
+	}
+
+	return st, nil
+}
+
 // validTransitions maps each status to the set of statuses it may transition to.
 var validTransitions = map[models.JobStatus][]models.JobStatus{
 	models.StatusDiscovered: {models.StatusNotified, models.StatusRejected},

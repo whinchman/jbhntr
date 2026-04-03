@@ -221,6 +221,12 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if user.BannedAt != nil {
+		s.setFlash(w, r, "Your account has been suspended.")
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
 	if err := s.setSession(w, r, user); err != nil {
 		slog.Error("setSession error during login", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

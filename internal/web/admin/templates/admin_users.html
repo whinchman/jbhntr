@@ -1,0 +1,61 @@
+{{define "title"}}Users — JobHuntr Admin{{end}}
+
+{{define "content"}}
+<h1>Users</h1>
+
+{{if .TempPassword}}
+<article role="alert" style="background: #d4edda; border: 1px solid #c3e6cb; padding: 1rem; margin-bottom: 1rem;">
+  <strong>Temporary password set for user #{{.ResetUserID}}:</strong>
+  <code>{{.TempPassword}}</code>
+  <p style="margin:0;font-size:0.85em;">Copy and share this with the user. It will not be shown again.</p>
+</article>
+{{end}}
+
+<figure>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Email</th>
+        <th>Display Name</th>
+        <th>Created At</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Users}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.Email}}</td>
+        <td>{{.DisplayName}}</td>
+        <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+        <td>
+          {{if .BannedAt}}
+            <span style="color: #dc3545;">Banned</span>
+          {{else}}
+            <span style="color: #28a745;">Active</span>
+          {{end}}
+        </td>
+        <td>
+          {{if .BannedAt}}
+            <form method="post" action="/admin/users/{{.ID}}/unban" style="display:inline;">
+              <button type="submit" class="outline">Unban</button>
+            </form>
+          {{else}}
+            <form method="post" action="/admin/users/{{.ID}}/ban" style="display:inline;">
+              <button type="submit" class="outline contrast">Ban</button>
+            </form>
+          {{end}}
+          <form method="post" action="/admin/users/{{.ID}}/reset-password" style="display:inline;">
+            <button type="submit" class="outline secondary">Reset Password</button>
+          </form>
+        </td>
+      </tr>
+      {{else}}
+      <tr><td colspan="6">No users found.</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</figure>
+{{end}}

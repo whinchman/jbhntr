@@ -345,6 +345,12 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if dbUser.BannedAt != nil {
+		s.setFlash(w, r, "Your account has been suspended.")
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
 	// Create session.
 	if err := s.setSession(w, r, dbUser); err != nil {
 		slog.Error("failed to set session", "error", err)
@@ -534,6 +540,12 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 					}
 				}
 			}
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		if user.BannedAt != nil {
+			s.clearSession(w, r)
+			s.setFlash(w, r, "Your account has been suspended.")
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}

@@ -1,0 +1,38 @@
+{{define "title"}}Filters — JobHuntr Admin{{end}}
+
+{{define "content"}}
+<h1>Search Filters</h1>
+
+<figure>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>User Email</th>
+        <th>Keywords</th>
+        <th>Location</th>
+        <th>Min Salary</th>
+        <th>Max Salary</th>
+        <th>Title</th>
+        <th>Created At</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Filters}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.UserEmail}}</td>
+        <td>{{.Keywords}}</td>
+        <td>{{.Location}}</td>
+        <td>{{if .MinSalary}}{{.MinSalary}}{{else}}—{{end}}</td>
+        <td>{{if .MaxSalary}}{{.MaxSalary}}{{else}}—{{end}}</td>
+        <td>{{.Title}}</td>
+        <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="8">No filters found.</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</figure>
+{{end}}

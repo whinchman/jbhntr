@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{block "title" .}}JobHuntr Admin{{end}}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+</head>
+<body>
+  <nav class="app-nav" aria-label="Admin navigation">
+    <div class="app-nav-inner">
+      <a href="/admin" class="app-nav-brand"><strong>JobHuntr Admin</strong></a>
+      <div class="app-nav-links">
+        <a href="/admin">Dashboard</a>
+        <a href="/admin/users">Users</a>
+        <a href="/admin/filters">Filters</a>
+      </div>
+      <div class="app-nav-user">
+        <a href="/">Back to app</a>
+      </div>
+    </div>
+  </nav>
+  <main class="app-container">
+    {{block "content" .}}{{end}}
+  </main>
+</body>
+</html>

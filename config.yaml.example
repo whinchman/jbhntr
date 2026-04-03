@@ -40,3 +40,6 @@ resume:
 
 output:
   dir: "./output"
+
+admin:
+  password: "${ADMIN_PASSWORD}"  # HTTP Basic Auth password for /admin panel; username is "admin"

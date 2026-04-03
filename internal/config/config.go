@@ -37,7 +37,9 @@ type Config struct {
 	//     username: ${SMTP_USERNAME}
 	//     password: ${SMTP_PASSWORD}
 	//     from: noreply@example.com
-	SMTP SMTPConfig `yaml:"smtp"`
+	SMTP  SMTPConfig  `yaml:"smtp"`
+	// Admin holds HTTP Basic Auth credentials for the /admin panel.
+	Admin AdminConfig `yaml:"admin"`
 }
 
 // DatabaseConfig holds PostgreSQL connection settings.
@@ -128,6 +130,12 @@ type ResumeConfig struct {
 // OutputConfig specifies where generated files are written.
 type OutputConfig struct {
 	Dir string `yaml:"dir"`
+}
+
+// AdminConfig holds credentials for the /admin panel (HTTP Basic Auth).
+// The username is always "admin"; only the password is configurable.
+type AdminConfig struct {
+	Password string `yaml:"password"`
 }
 
 var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)

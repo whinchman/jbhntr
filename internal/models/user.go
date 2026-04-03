@@ -24,6 +24,9 @@ type User struct {
 	EmailVerifyExpiresAt *time.Time
 	ResetToken           *string
 	ResetExpiresAt       *time.Time
+
+	// BannedAt is nil for active users; non-nil means the user has been banned.
+	BannedAt *time.Time
 }
 
 // UserSearchFilter represents a per-user job search query configuration
