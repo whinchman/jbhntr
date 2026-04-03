@@ -147,13 +147,13 @@ Keep your topic name private — anyone who knows it can post notifications to y
 cp .env.example .env          # fill in all required secrets
 cp config.yaml.example config.yaml
 
-docker compose up --build     # starts app + postgres
+docker compose --profile prod up --build     # starts app + postgres
 ```
 
 To run in the background:
 
 ```bash
-docker compose up --build -d
+docker compose --profile prod up --build -d
 docker compose logs -f app
 ```
 
