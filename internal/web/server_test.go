@@ -1057,3 +1057,265 @@ func TestApproveJob_UserIsolation(t *testing.T) {
 		}
 	})
 }
+
+// ─── markdown download tests ─────────────────────────────────────────────────
+
+// newJobWithMarkdown creates a job with ResumeMarkdown and CoverMarkdown set.
+func newJobWithMarkdown(id int64) *models.Job {
+	return &models.Job{
+		ID:             id,
+		Title:          "Staff Engineer",
+		Company:        "Globex",
+		Location:       "Remote",
+		Status:         models.StatusComplete,
+		ResumeMarkdown: "# Resume\n\nThis is my resume.",
+		CoverMarkdown:  "# Cover Letter\n\nDear Hiring Manager,",
+	}
+}
+
+func TestDownloadResumeMarkdown(t *testing.T) {
+	t.Run("job with ResumeMarkdown returns 200 and markdown content", func(t *testing.T) {
+		job := newJobWithMarkdown(20)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/20/resume.md")
+		if err != nil {
+			t.Fatalf("GET /output/20/resume.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.HasPrefix(ct, "text/markdown") {
+			t.Errorf("Content-Type = %q, want text/markdown", ct)
+		}
+		cd := resp.Header.Get("Content-Disposition")
+		if !strings.Contains(cd, "resume.md") {
+			t.Errorf("Content-Disposition = %q, want attachment; filename=resume.md", cd)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), "# Resume") {
+			t.Errorf("body = %q, want to contain resume markdown", string(body))
+		}
+	})
+
+	t.Run("job with empty ResumeMarkdown returns 404", func(t *testing.T) {
+		job := newTestJob(21, models.StatusComplete)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/21/resume.md")
+		if err != nil {
+			t.Fatalf("GET /output/21/resume.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/resume.md")
+		if err != nil {
+			t.Fatalf("GET /output/999/resume.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestDownloadCoverMarkdown(t *testing.T) {
+	t.Run("job with CoverMarkdown returns 200 and markdown content", func(t *testing.T) {
+		job := newJobWithMarkdown(30)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/30/cover_letter.md")
+		if err != nil {
+			t.Fatalf("GET /output/30/cover_letter.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.HasPrefix(ct, "text/markdown") {
+			t.Errorf("Content-Type = %q, want text/markdown", ct)
+		}
+		cd := resp.Header.Get("Content-Disposition")
+		if !strings.Contains(cd, "cover_letter.md") {
+			t.Errorf("Content-Disposition = %q, want attachment; filename=cover_letter.md", cd)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), "# Cover Letter") {
+			t.Errorf("body = %q, want to contain cover letter markdown", string(body))
+		}
+	})
+
+	t.Run("job with empty CoverMarkdown returns 404", func(t *testing.T) {
+		job := newTestJob(31, models.StatusComplete)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/31/cover_letter.md")
+		if err != nil {
+			t.Fatalf("GET /output/31/cover_letter.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/cover_letter.md")
+		if err != nil {
+			t.Fatalf("GET /output/999/cover_letter.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestDownloadResumeDocx(t *testing.T) {
+	t.Run("job with ResumeMarkdown returns 200 and DOCX content", func(t *testing.T) {
+		job := newJobWithMarkdown(40)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/40/resume.docx")
+		if err != nil {
+			t.Fatalf("GET /output/40/resume.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		wantCT := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		if ct != wantCT {
+			t.Errorf("Content-Type = %q, want %q", ct, wantCT)
+		}
+		cd := resp.Header.Get("Content-Disposition")
+		if !strings.Contains(cd, "resume.docx") {
+			t.Errorf("Content-Disposition = %q, want attachment; filename=resume.docx", cd)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		// DOCX files start with PK (zip magic bytes)
+		if len(body) < 2 || body[0] != 'P' || body[1] != 'K' {
+			t.Errorf("body does not look like a DOCX/ZIP file (first bytes: %v)", body[:4])
+		}
+	})
+
+	t.Run("job with empty ResumeMarkdown returns 404", func(t *testing.T) {
+		job := newTestJob(41, models.StatusComplete)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/41/resume.docx")
+		if err != nil {
+			t.Fatalf("GET /output/41/resume.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/resume.docx")
+		if err != nil {
+			t.Fatalf("GET /output/999/resume.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestDownloadCoverDocx(t *testing.T) {
+	t.Run("job with CoverMarkdown returns 200 and DOCX content", func(t *testing.T) {
+		job := newJobWithMarkdown(50)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/50/cover_letter.docx")
+		if err != nil {
+			t.Fatalf("GET /output/50/cover_letter.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		wantCT := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		if ct != wantCT {
+			t.Errorf("Content-Type = %q, want %q", ct, wantCT)
+		}
+		cd := resp.Header.Get("Content-Disposition")
+		if !strings.Contains(cd, "cover_letter.docx") {
+			t.Errorf("Content-Disposition = %q, want attachment; filename=cover_letter.docx", cd)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if len(body) < 2 || body[0] != 'P' || body[1] != 'K' {
+			t.Errorf("body does not look like a DOCX/ZIP file (first bytes: %v)", body[:4])
+		}
+	})
+
+	t.Run("job with empty CoverMarkdown returns 404", func(t *testing.T) {
+		job := newTestJob(51, models.StatusComplete)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/51/cover_letter.docx")
+		if err != nil {
+			t.Fatalf("GET /output/51/cover_letter.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/cover_letter.docx")
+		if err != nil {
+			t.Fatalf("GET /output/999/cover_letter.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}

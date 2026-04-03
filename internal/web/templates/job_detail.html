@@ -40,20 +40,28 @@
 <div class="document-preview">
   {{.ResumeHTML}}
 </div>
+{{if .Job.ResumeMarkdown}}
 <p>
-  <a href="/output/{{.Job.ID}}/resume.pdf" download="resume.pdf" role="button" class="outline">
-    Download Resume PDF
-  </a>
+  <a href="/output/{{.Job.ID}}/resume.md" download="resume.md" role="button" class="outline secondary">Download Markdown</a>
+  <a href="/output/{{.Job.ID}}/resume.docx" download="resume.docx" role="button" class="outline secondary">Download DOCX</a>
+  {{if .Job.ResumePDF}}
+  <a href="/output/{{.Job.ID}}/resume.pdf" download="resume.pdf" role="button" class="outline">Download PDF</a>
+  {{end}}
 </p>
+{{end}}
 
 <h2>Cover Letter</h2>
 <div class="document-preview">
   {{.CoverHTML}}
 </div>
+{{if .Job.CoverMarkdown}}
 <p>
-  <a href="/output/{{.Job.ID}}/cover_letter.pdf" download="cover_letter.pdf" role="button" class="outline">
-    Download Cover Letter PDF
-  </a>
+  <a href="/output/{{.Job.ID}}/cover_letter.md" download="cover_letter.md" role="button" class="outline secondary">Download Markdown</a>
+  <a href="/output/{{.Job.ID}}/cover_letter.docx" download="cover_letter.docx" role="button" class="outline secondary">Download DOCX</a>
+  {{if .Job.CoverPDF}}
+  <a href="/output/{{.Job.ID}}/cover_letter.pdf" download="cover_letter.pdf" role="button" class="outline">Download PDF</a>
+  {{end}}
 </p>
+{{end}}
 {{end}}
 {{end}}
