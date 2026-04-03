@@ -37,11 +37,10 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://jobhuntr:secret@db:5432/jobhuntr?sslmode=disable
+      PORT: "8080"
     volumes:
       - .:/workspace
       - go-mod-cache:/root/go/pkg/mod
-    environment:
-      PORT: "8080"
     ports:
       - "8080:8080"
     depends_on:
