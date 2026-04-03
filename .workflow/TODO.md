@@ -8,15 +8,6 @@ Worker agents (coder, designer, automation, qa, code-reviewer) pick up
 
 ---
 
-## modern-design — Update design look to be more modern
-
-**Plan:** `.workflow/plans/modern-design.md`
-**Design spec:** `.workflow/plans/modern-design-spec.md`
-**Tasks:**
-- [ ] `modern-design-1-css-static` (Group 1) — Create app.css + /static/* route
-- [ ] `modern-design-2-layout-login` (Group 2, parallel) — Update layout.html + login.html
-- [ ] `modern-design-3-content-templates` (Group 2, parallel) — Update remaining templates
-
 ## resume-export — Markdown, DOCX, and optional PDF downloads
 
 **Plan:** `.workflow/plans/resume-export.md`

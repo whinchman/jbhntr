@@ -5,6 +5,18 @@ to the default branch.
 
 ---
 
+## Modern Design Refresh
+
+**Completed:** 2026-04-03
+
+Replaced all inline styles with a single `app.css` override file on top of PicoCSS v2. Remapped Pico custom properties to a fresh token set (indigo accent, neutral off-white background, 7 status badge variants). Added `/static/*` route via Go embed. All templates cleaned of inline styles. No build tooling added.
+
+BUG-010 (low): `.providers-section` missing margin rule in app.css — cosmetic only, logged for future fix.
+
+Tasks: modern-design-1-css-static, modern-design-2-layout-login, modern-design-3-content-templates (all done, merged to development)
+
+---
+
 ## Per-User NTFY Notifications
 
 **Completed:** 2026-04-01
