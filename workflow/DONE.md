@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## UI Minor Features: Scrape Countdown Timer + Footer Attribution
+
+**Completed:** 2026-04-03
+
+Added a client-side JS countdown timer between the search bar and job table on the dashboard, driven by a `data-next-scrape` RFC3339 attribute rendered server-side (requires `Scheduler.Interval()` accessor + `WithScrapeInterval` wiring). Added a static footer on every page: "created out of spite by 217Industries" linking to www.217industries.com.
+
+Tasks: ui-minor-1-implementation, ui-minor-2-qa (done, merged to development)
+
+---
+
 ## Per-User NTFY Notifications
 
 **Completed:** 2026-04-01
