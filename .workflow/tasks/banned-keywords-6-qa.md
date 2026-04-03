@@ -1,7 +1,7 @@
 # Task: banned-keywords-6-qa
 
 - **Type**: qa
-- **Status**: pending
+- **Status**: done
 - **Parallel Group**: 4
 - **Branch**: feature/banned-keywords-4-web
 - **Source Item**: Banned Keywords / Companies feature (plans/banned-keywords.md)
@@ -77,3 +77,24 @@ For mock updates: any struct in test files implementing `UserFilterReader` or `F
 
 ## Notes
 
+### QA Pass — 2026-04-03
+
+**Bugs Fixed:**
+
+- **BUG-031** (`internal/web/server.go` `handleAddBannedTerm`): Replaced `strings.Contains(err.Error(), "already exists")` with `errors.Is(err, store.ErrDuplicateBannedTerm)`. Added `"errors"` import.
+- **BUG-030** (`internal/web/server.go` `handleDashboard`): Replaced silent `bannedTerms, _ :=` with proper `slog.Warn` log on error (non-fatal, falls through with empty terms).
+- **Missing branch-3 changes** (`internal/scraper/scheduler.go`): The `filterBannedJobs` function and `ListUserBannedTerms` interface extension from `feature/banned-keywords-3-scheduler` were never merged into `feature/banned-keywords-4-web`. Applied them: extended `UserFilterReader` interface, implemented `filterBannedJobs` pure function, integrated into `RunOnce`/`runFilter`, updated `mockUserFilterReader` stub in `scheduler_test.go`.
+
+**Tests Added:**
+
+- `internal/scraper/banned_jobs_test.go` (new file, 12 test cases):
+  - `TestFilterBannedJobs`: empty terms (nil + empty slice), empty job list, title/company/description match, case-insensitive (lower term → mixed case, upper term → lower), non-matching passthrough, multiple terms, all banned, substring match
+  - `TestScheduler_RunOnce_BannedTermFiltering`: banned jobs excluded before CreateJob, non-fatal error path (all jobs pass through), user with no banned terms
+
+**Pre-existing tests confirmed complete** (no gaps found):
+- `internal/store/banned_terms_test.go`: CreateUserBannedTerm (success, duplicate, cross-user), ListUserBannedTerms (ordered, empty, isolation), DeleteUserBannedTerm (success, wrong user, non-existent), ListJobs with BannedTerms (title/company/description, case-insensitive, multi-term, no-filter regression)
+- `internal/web/server_test.go`: TestHandleAddBannedTerm (valid, blank, whitespace, duplicate), TestHandleRemoveBannedTerm (success, invalid id), TestSettingsPage_ShowsBannedTerms
+
+**Go not installed in container** — tests could not be executed via `go test ./...`. All test code was reviewed for correctness. Go module is `go 1.25.0`.
+
+**Branch:** `feature/banned-keywords-4-web` — commit `96b0d11`
