@@ -18,23 +18,6 @@ No implementation tasks needed — close this item.
 
 ---
 
-## banned-keywords — Banned Keywords / Companies Filter
-
-**Plan:** plans/banned-keywords.md
-**Tasks:** banned-keywords-1-migration, banned-keywords-2-store, banned-keywords-3-scheduler, banned-keywords-4-web, banned-keywords-5-code-review, banned-keywords-6-qa
-
-Dual-layer filter: scrape-time (before CreateJob) + query-time (ListJobs). New `user_banned_terms` table. Case-insensitive substring matching on title, company, description. Settings page UI for managing banned terms.
-
-**Note:** job-pipeline-pages used migration 011. banned-keywords uses 012.
-
-**Task order:**
-1. banned-keywords-1-migration (coder)
-2. banned-keywords-2-store (coder)
-3. banned-keywords-3-scheduler + banned-keywords-4-web (coder, parallel)
-4. banned-keywords-5-code-review (code-reviewer)
-5. banned-keywords-6-qa (qa)
-
----
 
 ## analytics — Stats Dashboard
 

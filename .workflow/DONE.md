@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## Banned Keywords / Companies Filter
+
+**Completed:** 2026-04-03
+
+Per-user banned keywords/companies list managed in Settings. Dual-layer filtering: scrape-time (`filterBannedJobs` in scheduler, before `CreateJob`) and query-time (`NOT ILIKE` in `ListJobs`). New `user_banned_terms` table (migration 012) with `UNIQUE(user_id, term)` constraint. Case-insensitive substring match on title, company, and description. `ErrDuplicateBannedTerm` sentinel; silent duplicate handling in UI. BUG-030 (silent error discard) and BUG-031 (fragile string match) fixed inline.
+
+Tasks: banned-keywords-1-migration through banned-keywords-6-qa (all done, merged to development)
+
+---
+
 ## Job Pipeline Pages + Application Status
 
 **Completed:** 2026-04-03
