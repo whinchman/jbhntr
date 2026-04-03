@@ -17,7 +17,7 @@ workflow:
 
 testing:
   enabled: true
-  command: "npm test"
+  command: "go test ./..."
   test_dir: "tests/"
   test_pattern: "test_*"
 
