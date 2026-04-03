@@ -175,3 +175,117 @@ Additionally, branch 4 adds changes to `layout.html`, `dashboard.html`, and `app
 BUG-027 and BUG-028 can be fixed by patching the rejected/approved templates.
 BUG-029 requires either a new handler (preferred) or substituting the branch-3 static rejected template.
 
+---
+
+### Integration Review — feature/job-pipeline-3-4-integrated — 2026-04-03
+
+**Reviewing branch feature/job-pipeline-3-4-integrated against base feature/job-pipeline-2-models-store.**
+
+**Findings: 0 critical, 0 warning, 2 info. Verdict: approve.**
+
+All three previously reported bugs are resolved in this branch.
+
+#### BUG-027 Fix Verification
+- File: `internal/web/templates/rejected_jobs.html`
+- The integration branch replaces the `{{template "job_rows" .Jobs}}` call with a self-contained
+  inline 5-column row loop. Header has 5 `<th>` elements; rows have 5 `<td>` cells;
+  empty-state `colspan="5"` matches. BUG-027 is fully resolved. ✓
+
+#### BUG-028 Fix Verification
+- File: `internal/web/templates/approved_jobs.html`, `internal/web/templates/partials/approved_job_rows.html`
+- Header: `{{range .Columns}}` produces 6 `<th>` elements (Title, Company, Location, Salary,
+  Status, Date from `buildColumns`/`sortableColumns`) + `<th>Status Date</th>` + `<th>Application Status</th>` = **8 total**.
+- Row partial: 8 `<td>` cells (Title, Company, Location, Salary, Status-badge, applicationStatusDate,
+  DiscoveredAt, Application-select). Empty-state `colspan="8"` matches. BUG-028 is fully resolved. ✓
+
+#### BUG-029 Fix Verification
+- File: `internal/web/templates/rejected_jobs.html`
+- The integration branch uses the branch-3 static table version (no HTMX search/sort), eliminating
+  all `hx-get="/partials/rejected-job-table"` references. BUG-029 is resolved by design decision. ✓
+
+#### Template Variable Correctness
+
+**approved_jobs.html** accesses: `.Statuses`, `.ActiveStatus`, `.Search`, `.Columns`, `.Jobs`
+**approvedPageData** has all these fields. ✓
+
+**rejected_jobs.html** accesses: `.Jobs`
+**rejectedPageData** has `.Jobs`. ✓
+
+**layout.html** accesses: `.CSRFToken`, `.User`
+Both `approvedPageData` and `rejectedPageData` have both fields. ✓
+
+**approved_job_rows.html** accesses: `.ID`, `.Title`, `.Company`, `.Location`, `.ExtractedSalary`,
+`.Salary`, `.Status`, `.ApplicationStatus`, `.DiscoveredAt`, `.Summary` — all present on `models.Job`. ✓
+
+`applicationStatusDate` helper accesses `.WonAt`, `.LostAt`, `.InterviewingAt`, `.AppliedAt`
+(all `*time.Time` on `models.Job`) — nil checks present in helper. ✓
+
+Template `eq .ApplicationStatus "applied"` compares a named `string` type against a string
+literal — valid in Go templates via reflection. ✓
+
+#### Handler Completeness and Route Registration
+
+- `/jobs/approved` (GET) → `handleApprovedJobs` → under `optionalAuth` ✓
+- `/jobs/rejected` (GET) → `handleRejectedJobs` → under `optionalAuth` ✓
+- `/partials/approved-job-table` (GET) → `handleApprovedJobTablePartial` → under `optionalAuth` ✓
+- `POST /api/jobs/{id}/application-status` → `handleSetApplicationStatus` → under `requireAuth` ✓
+
+Template parsing:
+- `approvedJobsTmpl` includes `layout.html`, `approved_jobs.html`, `approved_job_rows.html` — all needed. ✓
+- `rejectedJobsTmpl` includes `layout.html`, `rejected_jobs.html`, `job_rows.html`.
+  `job_rows.html` is included but never invoked from `rejected_jobs.html` (info: see below). ✓
+
+#### HTMX Behaviour for Application Status Select
+
+In `approved_job_rows.html`, the `<select>` element:
+- `hx-post="/api/jobs/{{.ID}}/application-status"` — correct route. ✓
+- `hx-target="#job-row-{{.ID}}"` — targets the enclosing `<tr>`. ✓
+- `hx-swap="outerHTML"` — replaces the entire row fragment. ✓
+- `hx-include="this"` — scopes POST to just the `application_status` select value. ✓
+
+Server handler re-fetches the updated job and renders `approved_job_rows` with a 1-element
+slice, producing the replacement row fragment. Correct round-trip. ✓
+
+CSRF: layout.html injects `X-CSRF-Token` into `hx-headers` on `document.body`.
+All HTMX requests inherit it automatically. The `<select>` POST is covered. ✓
+
+#### Auth and Security
+
+- `handleSetApplicationStatus` validates `application_status` value before calling store (400 on bad input). ✓
+- Handler calls `pipelineStatusAllowed(job.Status)` before calling store (403 on non-pipeline job). ✓
+- `handleApprovedJobTablePartial` returns empty 200 for unauthenticated users rather than 401,
+  consistent with optionalAuth pattern (unauthenticated users see an empty table body). ✓
+- `userID = 0` fallback when `user == nil` is harmless under requireAuth; mock store's
+  `if userID != 0 && j.UserID != userID` guard passes through with zero ID. Acceptable. ✓
+- No SQL injection risks (parameterised queries in store; sort column validated via `allowedSortColumns` map). ✓
+
+#### Info Findings (no action required)
+
+**[INFO] `rejectedJobsTmpl` unnecessarily includes `job_rows.html`**
+- File: `internal/web/server.go` (template init block)
+- `job_rows.html` is parsed into `rejectedJobsTmpl` but `rejected_jobs.html` never calls
+  `{{template "job_rows" ...}}` in the integration branch. The `{{define "job_rows"}}` block
+  is registered but never invoked. No runtime error; just a minor cleanup opportunity.
+
+**[INFO] `rejectedPageData.Columns` is populated but unused**
+- File: `internal/web/server.go`
+- `handleRejectedJobs` calls `buildColumns(sort, order)` and stores the result in `Columns`,
+  but `rejected_jobs.html` never accesses `.Columns`. The field and call are dead code.
+  No functional impact.
+
+#### Acceptance Criteria Verification
+
+- [x] Migration 011 is additive and safe — verified in earlier branch reviews, unchanged here.
+- [x] `ApplicationStatus.Valid()` covers all four values — unchanged from branch 2 review.
+- [x] `UpdateApplicationStatus` enforces ownership and pipeline-stage — unchanged from branch 2 review.
+- [x] COALESCE logic preserves timestamps on repeated calls — unchanged from branch 2 review.
+- [x] `handleSetApplicationStatus` validates input before calling store.
+- [x] Returns 400 for bad input, 403 for non-pipeline job, 404 for missing job.
+- [x] `/jobs/approved`, `/jobs/rejected` under `optionalAuth`; POST endpoint under `requireAuth`.
+- [x] HTMX wiring is correct and consistent (`hx-post`, `hx-target`, `hx-swap`, `hx-include`).
+- [x] Dashboard no longer shows Approved/Rejected/Generating/Complete/Failed tabs.
+- [x] No SQL injection, no hardcoded credentials, no missing error handling on happy paths.
+
+**Integration review totals: 0 critical, 0 warning, 2 info.**
+**Verdict: approve.**
+
