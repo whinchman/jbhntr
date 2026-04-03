@@ -385,9 +385,15 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--color-text);
 }
 
+.job-table tbody tr {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
 .job-table td {
   padding: var(--space-3) var(--space-4);
   color: var(--color-text);
+  background-color: transparent;
   border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
 }
