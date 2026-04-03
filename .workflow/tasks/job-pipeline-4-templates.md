@@ -1,7 +1,7 @@
 # Task: job-pipeline-4-templates
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Parallel Group**: 3
 - **Branch**: feature/job-pipeline-4-templates
 - **Source Item**: job-pipeline-pages (plans/job-pipeline-pages.md)
@@ -120,3 +120,17 @@ Returns a human-readable status date string like "Applied Jan 2, 2026" or "—".
 
 ## Notes
 
+Implementation complete on branch `feature/job-pipeline-4-templates` (worktree at `/workspace/worktrees/job-pipeline-4-templates`), based off `feature/job-pipeline-2-models-store`.
+
+### What was implemented
+
+- `internal/web/templates/approved_jobs.html` — Approved Jobs page with tab bar for `approved`, `generating`, `complete`, `failed`, and `all` statuses. Uses HTMX to swap `#approved-job-table-body` on tab/search changes with 30s auto-refresh.
+- `internal/web/templates/rejected_jobs.html` — Rejected Jobs archive as a read-only table with search input and sortable headers via HTMX.
+- `internal/web/templates/partials/approved_job_rows.html` — `{{define "approved_job_rows"}}` partial that renders `<tr id="job-row-{{.ID}}>` rows. Each row includes the `<select>` for `application_status` wired with `hx-post="/api/jobs/{{.ID}}/application-status"`, `hx-target`, `hx-swap="outerHTML"`, `hx-include="this"`. The `applicationStatusDate` template function is called per row. Compatible with both `[]models.Job` (table render) and a single-item slice (row replacement).
+- `internal/web/templates/layout.html` — Added "Approved" (`/jobs/approved`) and "Rejected" (`/jobs/rejected`) nav links.
+- `internal/web/templates/dashboard.html` — Tab bar replaced with hardcoded `all`, `discovered`, `notified` tabs only (removed `approved`, `rejected`, `generating`, `complete`, `failed`).
+- `internal/web/templates/static/app.css` — Added `.status-applied`, `.status-interviewing`, `.status-won`, `.status-lost` badge classes using existing CSS variable tokens.
+
+### Test results
+
+Go is not installed in this container; `go test ./...` could not be executed. Template syntax was verified by manual review. No Go source files were modified.
