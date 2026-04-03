@@ -8,6 +8,17 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-024: [job-pipeline] migrate_test.go job-INSERT subtests not idempotent on repeated runs
+
+- File: `internal/store/migrate_test.go`, lines 97–139
+- Severity: warning (test failure on second run against same DB)
+- Branch: feature/job-pipeline-1-migration
+- Description: Four subtests (`adds user_id to jobs`, `adds application_status columns to jobs`, `application_status CHECK constraint rejects invalid values`, `application_status columns are nullable`) INSERT jobs with fixed `external_id` values (`'mig-test'`, `'mig-appstatus'`, `'mig-badstatus'`, `'mig-nullstatus'`) without `ON CONFLICT DO NOTHING`. Running the test suite a second time against the same persistent PostgreSQL database fails with `ERROR: duplicate key value violates unique constraint "idx_jobs_user_source_ext"`. The first three of these (lines 97-105) predate this task; the three new ones (lines 107-139) follow the same established pattern.
+- Reproduction: Set `TEST_DATABASE_URL`, run `go test ./internal/store/... -run TestMigrate` twice without resetting the DB between runs.
+- Fix: Add `ON CONFLICT (user_id, external_id, source) DO NOTHING` to all four INSERT statements, or generate randomised `external_id` values (e.g. `fmt.Sprintf("mig-appstatus-%d", time.Now().UnixNano())`).
+
+---
+
 ## BUG-022: [admin-panel] migrate_test.go missing migration 010 in expected list
 
 - File: `internal/store/migrate_test.go`, lines 42–52
