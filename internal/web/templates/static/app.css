@@ -479,19 +479,27 @@ textarea.mono {
 
 .inline-form {
   display: flex;
+  flex-wrap: nowrap;
   gap: var(--space-3);
   align-items: flex-end;
   max-width: 480px;
 }
 .inline-form-field {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 180px;
+  min-width: 180px;
 }
 .inline-form-field label {
+  display: block;
   margin-bottom: var(--space-1);
 }
 .inline-form-field input {
   width: 100%;
+  margin-bottom: 0;
+}
+.inline-form > button {
+  flex: 0 0 auto;
+  width: auto;
+  margin-bottom: 0;
 }
 
 /* currency prefix wrapper */
