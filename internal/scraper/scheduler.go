@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type StoreWriter interface {
 type UserFilterReader interface {
 	ListActiveUserIDs(ctx context.Context) ([]int64, error)
 	ListUserFilters(ctx context.Context, userID int64) ([]models.UserSearchFilter, error)
+	ListUserBannedTerms(ctx context.Context, userID int64) ([]models.UserBannedTerm, error)
 }
 
 // UserReader provides access to user records.
@@ -115,6 +117,13 @@ func (s *Scheduler) RunOnce(ctx context.Context) ([]models.Job, error) {
 			continue
 		}
 
+		// Fetch the user's banned terms once per user; errors are non-fatal.
+		bannedTerms, err := s.userFilters.ListUserBannedTerms(ctx, userID)
+		if err != nil {
+			s.logger.Error("failed to list banned terms for user", "user_id", userID, "error", err)
+			bannedTerms = nil
+		}
+
 		// Fetch the user's ntfy topic once per user, before iterating filters.
 		ntfyTopic := ""
 		if s.notifier != nil && s.userReader != nil {
@@ -128,7 +137,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) ([]models.Job, error) {
 
 		for _, uf := range filters {
 			filter := userFilterToSearchFilter(uf)
-			jobs, err := s.runFilter(ctx, userID, ntfyTopic, filter)
+			jobs, err := s.runFilter(ctx, userID, ntfyTopic, filter, bannedTerms)
 			if err != nil {
 				s.logger.Error("scrape filter failed", "user_id", userID, "filter", filter.Keywords, "error", err)
 				continue
@@ -156,9 +165,41 @@ func userFilterToSearchFilter(uf models.UserSearchFilter) models.SearchFilter {
 	}
 }
 
-// runFilter runs one search filter for a specific user: searches, stores
-// results, logs the run.
-func (s *Scheduler) runFilter(ctx context.Context, userID int64, ntfyTopic string, filter models.SearchFilter) ([]models.Job, error) {
+// filterBannedJobs returns jobs that do not match any of the banned terms.
+// Matching is case-insensitive substring matching on Title, Company, and
+// Description. If terms is empty the input slice is returned unchanged.
+func filterBannedJobs(jobs []models.Job, terms []models.UserBannedTerm) []models.Job {
+	if len(terms) == 0 {
+		return jobs
+	}
+	lower := make([]string, len(terms))
+	for i, t := range terms {
+		lower[i] = strings.ToLower(t.Term)
+	}
+	out := jobs[:0]
+	for _, j := range jobs {
+		titleL := strings.ToLower(j.Title)
+		companyL := strings.ToLower(j.Company)
+		descL := strings.ToLower(j.Description)
+		banned := false
+		for _, t := range lower {
+			if strings.Contains(titleL, t) ||
+				strings.Contains(companyL, t) ||
+				strings.Contains(descL, t) {
+				banned = true
+				break
+			}
+		}
+		if !banned {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
+// runFilter runs one search filter for a specific user: searches, filters
+// banned jobs, stores results, logs the run.
+func (s *Scheduler) runFilter(ctx context.Context, userID int64, ntfyTopic string, filter models.SearchFilter, bannedTerms []models.UserBannedTerm) ([]models.Job, error) {
 	started := time.Now()
 	run := &store.ScrapeRun{
 		Source:         "serpapi",
@@ -177,6 +218,8 @@ func (s *Scheduler) runFilter(ctx context.Context, userID int64, ntfyTopic strin
 	}
 
 	run.JobsFound = len(results)
+
+	results = filterBannedJobs(results, bannedTerms)
 
 	var newJobs []models.Job
 	for i := range results {

@@ -109,6 +109,10 @@ func (m *mockUserFilterReader) ListUserFilters(_ context.Context, userID int64) 
 	return m.filters[userID], nil
 }
 
+func (m *mockUserFilterReader) ListUserBannedTerms(_ context.Context, _ int64) ([]models.UserBannedTerm, error) {
+	return nil, nil
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 func job(ext, source string) models.Job {

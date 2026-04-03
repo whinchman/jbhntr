@@ -35,6 +35,7 @@ type ListJobsFilter struct {
 	Status            models.JobStatus
 	ApplicationStatus models.ApplicationStatus
 	Search            string
+	BannedTerms       []string // excludes jobs matching any term (case-insensitive substring)
 	Limit             int
 	Offset            int
 	Sort              string // column name (must be validated by caller)
@@ -242,6 +243,14 @@ func (s *Store) ListJobs(ctx context.Context, userID int64, f ListJobsFilter) ([
 	if f.Search != "" {
 		where = append(where, fmt.Sprintf("(title ILIKE $%d OR company ILIKE $%d OR description ILIKE $%d)", argN, argN+1, argN+2))
 		like := "%" + f.Search + "%"
+		args = append(args, like, like, like)
+		argN += 3
+	}
+	for _, t := range f.BannedTerms {
+		like := "%" + t + "%"
+		where = append(where, fmt.Sprintf(
+			"(title NOT ILIKE $%d AND company NOT ILIKE $%d AND description NOT ILIKE $%d)",
+			argN, argN+1, argN+2))
 		args = append(args, like, like, like)
 		argN += 3
 	}

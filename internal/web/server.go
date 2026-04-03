@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -85,6 +86,9 @@ type FilterStore interface {
 	DeleteUserFilter(ctx context.Context, userID int64, filterID int64) error
 	UpdateUserResume(ctx context.Context, userID int64, markdown string) error
 	UpdateUserNtfyTopic(ctx context.Context, userID int64, topic string) error
+	ListUserBannedTerms(ctx context.Context, userID int64) ([]models.UserBannedTerm, error)
+	CreateUserBannedTerm(ctx context.Context, userID int64, term string) (*models.UserBannedTerm, error)
+	DeleteUserBannedTerm(ctx context.Context, userID int64, termID int64) error
 }
 
 // EmailSender is the interface consumed by auth handlers to send email.
@@ -388,6 +392,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/settings/ntfy", s.handleSaveNtfyTopic)
 		r.Post("/settings/filters", s.handleAddFilter)
 		r.Post("/settings/filters/remove", s.handleRemoveFilter)
+		r.Post("/settings/banned-terms", s.handleAddBannedTerm)
+		r.Post("/settings/banned-terms/remove", s.handleRemoveBannedTerm)
 
 		r.Get("/onboarding", s.handleOnboardingGet)
 		r.Post("/onboarding", s.handleOnboardingPost)
@@ -488,16 +494,25 @@ func parseSortParams(q url.Values) (string, string) {
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	sort, order := parseSortParams(q)
-	f := store.ListJobsFilter{
-		Status: models.JobStatus(q.Get("status")),
-		Search: q.Get("q"),
-		Sort:   sort,
-		Order:  order,
-	}
 	user := UserFromContext(r.Context())
 	var userID int64
 	if user != nil {
 		userID = user.ID
+	}
+	var bannedTermStrings []string
+	if s.filterStore != nil && user != nil {
+		bannedTerms, err := s.filterStore.ListUserBannedTerms(r.Context(), userID)
+		if err != nil {
+			slog.Warn("failed to load banned terms for dashboard", "error", err, "user_id", userID)
+		}
+		bannedTermStrings = bannedTermsToStrings(bannedTerms)
+	}
+	f := store.ListJobsFilter{
+		Status:      models.JobStatus(q.Get("status")),
+		Search:      q.Get("q"),
+		Sort:        sort,
+		Order:       order,
+		BannedTerms: bannedTermStrings,
 	}
 	jobs, err := s.store.ListJobs(r.Context(), userID, f)
 	if err != nil {
@@ -981,12 +996,13 @@ func (s *Server) respondJobAction(w http.ResponseWriter, r *http.Request, job *m
 // ─── settings handlers ────────────────────────────────────────────────────────
 
 type settingsData struct {
-	Filters   []models.UserSearchFilter
-	Resume    string
-	NtfyTopic string
-	Saved     bool
-	CSRFToken string
-	User      *models.User
+	Filters     []models.UserSearchFilter
+	BannedTerms []models.UserBannedTerm
+	Resume      string
+	NtfyTopic   string
+	Saved       bool
+	CSRFToken   string
+	User        *models.User
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -1010,6 +1026,16 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		filters = []models.UserSearchFilter{}
 	}
 
+	bannedTerms, err := s.filterStore.ListUserBannedTerms(r.Context(), userID)
+	if err != nil {
+		slog.Error("failed to list banned terms", "error", err)
+		http.Error(w, "failed to load settings", http.StatusInternalServerError)
+		return
+	}
+	if bannedTerms == nil {
+		bannedTerms = []models.UserBannedTerm{}
+	}
+
 	resume := ""
 	ntfyTopic := ""
 	if user != nil {
@@ -1018,12 +1044,13 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := settingsData{
-		Filters:   filters,
-		Resume:    resume,
-		NtfyTopic: ntfyTopic,
-		Saved:     r.URL.Query().Get("saved") == "1",
-		CSRFToken: csrf.Token(r),
-		User:      user,
+		Filters:     filters,
+		BannedTerms: bannedTerms,
+		Resume:      resume,
+		NtfyTopic:   ntfyTopic,
+		Saved:       r.URL.Query().Get("saved") == "1",
+		CSRFToken:   csrf.Token(r),
+		User:        user,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.settingsTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -1133,6 +1160,74 @@ func (s *Server) handleRemoveFilter(w http.ResponseWriter, r *http.Request) {
 	if err := s.filterStore.DeleteUserFilter(r.Context(), userID, filterID); err != nil {
 		slog.Error("failed to delete filter", "error", err, "user_id", userID, "filter_id", filterID)
 		http.Error(w, "failed to remove filter", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+}
+
+// bannedTermsToStrings converts a slice of UserBannedTerm to a plain string slice
+// for use in store.ListJobsFilter.BannedTerms.
+func bannedTermsToStrings(terms []models.UserBannedTerm) []string {
+	out := make([]string, len(terms))
+	for i, t := range terms {
+		out[i] = t.Term
+	}
+	return out
+}
+
+func (s *Server) handleAddBannedTerm(w http.ResponseWriter, r *http.Request) {
+	if s.filterStore == nil {
+		http.Error(w, "settings not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	term := strings.TrimSpace(r.FormValue("term"))
+	if term == "" {
+		http.Error(w, "term is required", http.StatusBadRequest)
+		return
+	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+
+	_, err := s.filterStore.CreateUserBannedTerm(r.Context(), userID, term)
+	if err != nil {
+		if errors.Is(err, store.ErrDuplicateBannedTerm) {
+			// Duplicate: redirect silently so the UI remains usable.
+			http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+			return
+		}
+		slog.Error("failed to create banned term", "error", err, "user_id", userID)
+		http.Error(w, "failed to save banned term", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
+}
+
+func (s *Server) handleRemoveBannedTerm(w http.ResponseWriter, r *http.Request) {
+	if s.filterStore == nil {
+		http.Error(w, "settings not configured", http.StatusServiceUnavailable)
+		return
+	}
+	termID, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid term id", http.StatusBadRequest)
+		return
+	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+
+	if err := s.filterStore.DeleteUserBannedTerm(r.Context(), userID, termID); err != nil {
+		slog.Error("failed to delete banned term", "error", err, "user_id", userID, "term_id", termID)
+		http.Error(w, "failed to remove banned term", http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
