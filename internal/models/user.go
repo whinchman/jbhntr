@@ -29,6 +29,14 @@ type User struct {
 	BannedAt *time.Time
 }
 
+// UserBannedTerm is one entry in a user's banned-keywords list.
+type UserBannedTerm struct {
+	ID        int64
+	UserID    int64
+	Term      string
+	CreatedAt time.Time
+}
+
 // UserSearchFilter represents a per-user job search query configuration
 // stored in the database.
 type UserSearchFilter struct {
