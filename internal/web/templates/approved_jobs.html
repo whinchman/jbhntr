@@ -1,0 +1,65 @@
+{{template "layout.html" .}}
+
+{{define "title"}}JobHuntr — Approved Jobs{{end}}
+
+{{define "content"}}
+<h1>Approved Jobs</h1>
+
+<div class="tab-bar">
+  {{range $status := .Statuses}}
+  <a href="?status={{$status}}" role="button"
+     class="{{if eq $status $.ActiveStatus}}contrast{{else}}outline{{end}}"
+     hx-get="/partials/approved-job-table?status={{$status}}"
+     hx-target="#approved-job-table-body"
+     hx-swap="innerHTML"
+     hx-push-url="true">
+    {{$status}}
+  </a>
+  {{end}}
+  <a href="/jobs/approved" role="button"
+     class="{{if eq $.ActiveStatus ""}}contrast{{else}}outline{{end}}"
+     hx-get="/partials/approved-job-table"
+     hx-target="#approved-job-table-body"
+     hx-swap="innerHTML"
+     hx-push-url="true">
+    all
+  </a>
+</div>
+
+<input type="search" name="q" placeholder="Search approved jobs…"
+       hx-get="/partials/approved-job-table"
+       hx-trigger="keyup changed delay:300ms"
+       hx-target="#approved-job-table-body"
+       hx-swap="innerHTML"
+       hx-push-url="true"
+       hx-include="[name='q']"
+       value="{{.Search}}">
+
+<div hx-get="/partials/approved-job-table"
+     hx-vals="js:{status: new URLSearchParams(location.search).get('status') || '', q: new URLSearchParams(location.search).get('q') || '', sort: new URLSearchParams(location.search).get('sort') || '', order: new URLSearchParams(location.search).get('order') || ''}"
+     hx-trigger="every 30s"
+     hx-target="#approved-job-table-body"
+     hx-swap="innerHTML">
+  <div class="job-table-wrapper">
+    <table class="job-table">
+      <thead>
+        <tr>
+          {{- $base := printf "status=%s&q=%s" .ActiveStatus .Search -}}
+          {{- range .Columns -}}
+          <th hx-get="/partials/approved-job-table?{{$base}}&sort={{.Key}}&order={{.NextOrder}}"
+              hx-target="#approved-job-table-body"
+              hx-swap="innerHTML">
+            {{.Label}}{{if .Arrow}} {{.Arrow}}{{end}}
+          </th>
+          {{- end -}}
+          <th>Status Date</th>
+          <th>Application Status</th>
+        </tr>
+      </thead>
+      <tbody id="approved-job-table-body">
+        {{template "approved_job_rows" .Jobs}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

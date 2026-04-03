@@ -60,6 +60,7 @@ type JobStore interface {
 	GetJob(ctx context.Context, userID int64, id int64) (*models.Job, error)
 	ListJobs(ctx context.Context, userID int64, f store.ListJobsFilter) ([]models.Job, error)
 	UpdateJobStatus(ctx context.Context, userID int64, id int64, status models.JobStatus) error
+	UpdateApplicationStatus(ctx context.Context, userID int64, jobID int64, status models.ApplicationStatus) error
 }
 
 // UserStore is the subset of store.Store used by the auth system.
@@ -92,10 +93,14 @@ type EmailSender interface {
 	SendMail(ctx context.Context, to, subject, body string) error
 }
 
-// allStatuses lists job statuses shown as tabs in the dashboard.
-var allStatuses = []models.JobStatus{
-	models.StatusDiscovered, models.StatusNotified, models.StatusApproved,
-	models.StatusGenerating, models.StatusComplete, models.StatusFailed, models.StatusRejected,
+// dashboardStatuses lists job statuses shown as tabs in the dashboard (triage view).
+var dashboardStatuses = []models.JobStatus{
+	models.StatusDiscovered, models.StatusNotified,
+}
+
+// approvedPageStatuses lists job statuses shown on the Approved Jobs page.
+var approvedPageStatuses = []models.JobStatus{
+	models.StatusApproved, models.StatusGenerating, models.StatusComplete, models.StatusFailed,
 }
 
 // Server holds the HTTP dependencies.
@@ -110,16 +115,18 @@ type Server struct {
 	mailer         EmailSender
 	rateLimiters   sync.Map // map[string]*rate.Limiter — keyed by IP
 
-	templates         *template.Template
-	detailTmpl        *template.Template
-	settingsTmpl      *template.Template
-	profileTmpl       *template.Template
-	onboardingTmpl    *template.Template
-	loginTmpl         *template.Template
-	registerTmpl      *template.Template
-	verifyEmailTmpl   *template.Template
+	templates          *template.Template
+	detailTmpl         *template.Template
+	settingsTmpl       *template.Template
+	profileTmpl        *template.Template
+	onboardingTmpl     *template.Template
+	loginTmpl          *template.Template
+	registerTmpl       *template.Template
+	verifyEmailTmpl    *template.Template
 	forgotPasswordTmpl *template.Template
-	resetPasswordTmpl *template.Template
+	resetPasswordTmpl  *template.Template
+	approvedJobsTmpl   *template.Template
+	rejectedJobsTmpl   *template.Template
 
 	startTime      time.Time
 	lastScrapeFn   func() time.Time // optional; returns last scrape time
@@ -150,8 +157,33 @@ func commaDollars(n int) string {
 	return "$" + string(out)
 }
 
+// applicationStatusDate returns a human-readable string describing when the
+// job reached its current application status.
+func applicationStatusDate(job models.Job) string {
+	switch models.ApplicationStatus(job.ApplicationStatus) {
+	case models.AppStatusWon:
+		if job.WonAt != nil {
+			return "Won " + job.WonAt.Format("Jan 2, 2006")
+		}
+	case models.AppStatusLost:
+		if job.LostAt != nil {
+			return "Lost " + job.LostAt.Format("Jan 2, 2006")
+		}
+	case models.AppStatusInterviewing:
+		if job.InterviewingAt != nil {
+			return "Interviewing since " + job.InterviewingAt.Format("Jan 2, 2006")
+		}
+	case models.AppStatusApplied:
+		if job.AppliedAt != nil {
+			return "Applied " + job.AppliedAt.Format("Jan 2, 2006")
+		}
+	}
+	return "—"
+}
+
 var tmplFuncs = template.FuncMap{
-	"commaDollars": commaDollars,
+	"commaDollars":          commaDollars,
+	"applicationStatusDate": applicationStatusDate,
 }
 
 // NewServerWithConfig constructs a Server with config, auth, and filter store.
@@ -183,6 +215,16 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 	verifyEmailTmpl := template.Must(template.ParseFS(templateFS, "templates/verify_email.html"))
 	forgotPasswordTmpl := template.Must(template.ParseFS(templateFS, "templates/forgot_password.html"))
 	resetPasswordTmpl := template.Must(template.ParseFS(templateFS, "templates/reset_password.html"))
+	approvedJobsTmpl := template.Must(template.New("layout.html").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html",
+		"templates/approved_jobs.html",
+		"templates/partials/approved_job_rows.html",
+	))
+	rejectedJobsTmpl := template.Must(template.New("layout.html").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html",
+		"templates/rejected_jobs.html",
+		"templates/partials/job_rows.html",
+	))
 
 	srv := &Server{
 		store:              st,
@@ -198,6 +240,8 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		verifyEmailTmpl:    verifyEmailTmpl,
 		forgotPasswordTmpl: forgotPasswordTmpl,
 		resetPasswordTmpl:  resetPasswordTmpl,
+		approvedJobsTmpl:   approvedJobsTmpl,
+		rejectedJobsTmpl:   rejectedJobsTmpl,
 		startTime:          time.Now(),
 		cfg:                cfg,
 	}
@@ -320,6 +364,9 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/", s.handleDashboard)
 		r.Get("/partials/job-table", s.handleJobTablePartial)
+		r.Get("/jobs/approved", s.handleApprovedJobs)
+		r.Get("/jobs/rejected", s.handleRejectedJobs)
+		r.Get("/partials/approved-job-table", s.handleApprovedJobTablePartial)
 	})
 
 	// Protected routes — require authenticated session.
@@ -355,6 +402,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/{id}", s.handleGetJob)
 			r.Post("/{id}/approve", s.handleApproveJob)
 			r.Post("/{id}/reject", s.handleRejectJob)
+			r.Post("/{id}/application-status", s.handleSetApplicationStatus)
 		})
 	})
 
@@ -467,7 +515,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	data := dashboardData{
 		Jobs:         jobs,
-		Statuses:     allStatuses,
+		Statuses:     dashboardStatuses,
 		ActiveStatus: string(f.Status),
 		Search:       f.Search,
 		Sort:         sort,
@@ -511,6 +559,267 @@ func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
 	if err := s.templates.ExecuteTemplate(w, "job_rows", jobs); err != nil {
 		slog.Error("template render error", "error", err)
 	}
+}
+
+// approvedPageData is the template data for the /jobs/approved page.
+type approvedPageData struct {
+	Jobs         []models.Job
+	Statuses     []models.JobStatus
+	ActiveStatus string
+	Search       string
+	Sort         string
+	Order        string
+	Columns      []columnDef
+	CSRFToken    string
+	User         *models.User
+}
+
+// rejectedPageData is the template data for the /jobs/rejected page.
+type rejectedPageData struct {
+	Jobs      []models.Job
+	Search    string
+	Sort      string
+	Order     string
+	Columns   []columnDef
+	CSRFToken string
+	User      *models.User
+}
+
+func (s *Server) handleApprovedJobs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	sort, order := parseSortParams(q)
+	f := store.ListJobsFilter{
+		Status: models.JobStatus(q.Get("status")),
+		Search: q.Get("q"),
+		Sort:   sort,
+		Order:  order,
+	}
+	// When no status is specified, list all approved-pipeline statuses by
+	// running multiple queries and merging. For simplicity, we pass the
+	// filter as-is and let the store return jobs for the selected status.
+	// The template renders tab links for all approvedPageStatuses.
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	// If no specific status requested, default to showing all approved-pipeline jobs.
+	if f.Status == "" {
+		var allJobs []models.Job
+		for _, st := range approvedPageStatuses {
+			jf := f
+			jf.Status = st
+			jobs, err := s.store.ListJobs(r.Context(), userID, jf)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list jobs")
+				return
+			}
+			allJobs = append(allJobs, jobs...)
+		}
+		if allJobs == nil {
+			allJobs = []models.Job{}
+		}
+		data := approvedPageData{
+			Jobs:         allJobs,
+			Statuses:     approvedPageStatuses,
+			ActiveStatus: "",
+			Search:       f.Search,
+			Sort:         sort,
+			Order:        order,
+			Columns:      buildColumns(sort, order),
+			CSRFToken:    csrf.Token(r),
+			User:         user,
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := s.approvedJobsTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+			slog.Error("template render error", "error", err)
+		}
+		return
+	}
+	jobs, err := s.store.ListJobs(r.Context(), userID, f)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list jobs")
+		return
+	}
+	if jobs == nil {
+		jobs = []models.Job{}
+	}
+	data := approvedPageData{
+		Jobs:         jobs,
+		Statuses:     approvedPageStatuses,
+		ActiveStatus: string(f.Status),
+		Search:       f.Search,
+		Sort:         sort,
+		Order:        order,
+		Columns:      buildColumns(sort, order),
+		CSRFToken:    csrf.Token(r),
+		User:         user,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.approvedJobsTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+		slog.Error("template render error", "error", err)
+	}
+}
+
+func (s *Server) handleRejectedJobs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	sort, order := parseSortParams(q)
+	f := store.ListJobsFilter{
+		Status: models.StatusRejected,
+		Search: q.Get("q"),
+		Sort:   sort,
+		Order:  order,
+	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	jobs, err := s.store.ListJobs(r.Context(), userID, f)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list jobs")
+		return
+	}
+	if jobs == nil {
+		jobs = []models.Job{}
+	}
+	data := rejectedPageData{
+		Jobs:      jobs,
+		Search:    f.Search,
+		Sort:      sort,
+		Order:     order,
+		Columns:   buildColumns(sort, order),
+		CSRFToken: csrf.Token(r),
+		User:      user,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.rejectedJobsTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+		slog.Error("template render error", "error", err)
+	}
+}
+
+func (s *Server) handleApprovedJobTablePartial(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		return
+	}
+	q := r.URL.Query()
+	sort, order := parseSortParams(q)
+	f := store.ListJobsFilter{
+		Status: models.JobStatus(q.Get("status")),
+		Search: q.Get("q"),
+		Sort:   sort,
+		Order:  order,
+	}
+	var jobs []models.Job
+	if f.Status == "" {
+		for _, st := range approvedPageStatuses {
+			jf := f
+			jf.Status = st
+			js, err := s.store.ListJobs(r.Context(), user.ID, jf)
+			if err != nil {
+				http.Error(w, "failed to list jobs", http.StatusInternalServerError)
+				return
+			}
+			jobs = append(jobs, js...)
+		}
+	} else {
+		var err error
+		jobs, err = s.store.ListJobs(r.Context(), user.ID, f)
+		if err != nil {
+			http.Error(w, "failed to list jobs", http.StatusInternalServerError)
+			return
+		}
+	}
+	if jobs == nil {
+		jobs = []models.Job{}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.approvedJobsTmpl.ExecuteTemplate(w, "approved_job_rows", jobs); err != nil {
+		slog.Error("template render error", "error", err)
+	}
+}
+
+// validApplicationStatuses is the set of statuses accepted by
+// handleSetApplicationStatus.
+var validApplicationStatuses = map[models.ApplicationStatus]bool{
+	models.AppStatusApplied:      true,
+	models.AppStatusInterviewing: true,
+	models.AppStatusLost:         true,
+	models.AppStatusWon:          true,
+}
+
+func (s *Server) handleSetApplicationStatus(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+
+	if err := r.ParseForm(); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid form data")
+		return
+	}
+	rawStatus := r.FormValue("application_status")
+	appStatus := models.ApplicationStatus(rawStatus)
+	if !validApplicationStatuses[appStatus] {
+		writeError(w, http.StatusBadRequest, "invalid application_status: "+rawStatus)
+		return
+	}
+
+	// Verify the job exists, belongs to the user, and is in an approved-pipeline stage.
+	job, err := s.store.GetJob(r.Context(), userID, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get job")
+		return
+	}
+	if !pipelineStatusAllowed(job.Status) {
+		writeError(w, http.StatusForbidden, "job is not in an approved-pipeline stage")
+		return
+	}
+
+	if err := s.store.UpdateApplicationStatus(r.Context(), userID, id, appStatus); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		if strings.Contains(err.Error(), "not in pipeline") || strings.Contains(err.Error(), "invalid") {
+			writeError(w, http.StatusForbidden, "cannot update application status: "+err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update application status")
+		return
+	}
+
+	// Re-fetch the updated job to render the replacement row fragment.
+	job, err = s.store.GetJob(r.Context(), userID, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to reload job")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.approvedJobsTmpl.ExecuteTemplate(w, "approved_job_rows", []models.Job{*job}); err != nil {
+		slog.Error("template render error", "error", err)
+	}
+}
+
+// pipelineStatusAllowed returns true if the job status is in the
+// approved-pipeline stages (approved, generating, complete, failed).
+func pipelineStatusAllowed(s models.JobStatus) bool {
+	switch s {
+	case models.StatusApproved, models.StatusGenerating, models.StatusComplete, models.StatusFailed:
+		return true
+	}
+	return false
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

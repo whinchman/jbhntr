@@ -49,6 +49,8 @@ func TestMigrate(t *testing.T) {
 			"007_add_ntfy_topic_to_users.sql",
 			"008_add_markdown_columns.sql",
 			"009_add_email_auth.sql",
+			"010_add_banned_at_to_users.sql",
+			"011_add_application_status.sql",
 		}
 		if len(names) != len(expected) {
 			t.Fatalf("migrations applied = %d, want %d: %v", len(names), len(expected), names)
@@ -99,6 +101,40 @@ func TestMigrate(t *testing.T) {
 		)
 		if err != nil {
 			t.Fatalf("INSERT into jobs with user_id error = %v", err)
+		}
+	})
+
+	t.Run("adds application_status columns to jobs", func(t *testing.T) {
+		s := openTestStore(t)
+		// Verify columns exist and accept valid values.
+		_, err := s.db.Exec(`
+			INSERT INTO jobs (user_id, external_id, source, status, application_status, applied_at)
+			VALUES (0, 'mig-appstatus', 'test', 'discovered', 'applied', NOW())
+		`)
+		if err != nil {
+			t.Fatalf("INSERT with application_status=applied error = %v", err)
+		}
+	})
+
+	t.Run("application_status CHECK constraint rejects invalid values", func(t *testing.T) {
+		s := openTestStore(t)
+		_, err := s.db.Exec(`
+			INSERT INTO jobs (user_id, external_id, source, status, application_status)
+			VALUES (0, 'mig-badstatus', 'test', 'discovered', 'invalid_value')
+		`)
+		if err == nil {
+			t.Fatal("INSERT with invalid application_status should have failed, got nil")
+		}
+	})
+
+	t.Run("application_status columns are nullable", func(t *testing.T) {
+		s := openTestStore(t)
+		_, err := s.db.Exec(`
+			INSERT INTO jobs (user_id, external_id, source, status)
+			VALUES (0, 'mig-nullstatus', 'test', 'discovered')
+		`)
+		if err != nil {
+			t.Fatalf("INSERT with NULL application_status columns error = %v", err)
 		}
 	})
 }

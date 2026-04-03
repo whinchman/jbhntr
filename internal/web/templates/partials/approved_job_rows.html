@@ -1,0 +1,36 @@
+{{define "approved_job_rows"}}
+{{if not .}}
+<tr><td colspan="8" class="job-table-empty">No jobs found.</td></tr>
+{{else}}
+{{range .}}
+<tr id="job-row-{{.ID}}">
+  <td><a href="/jobs/{{.ID}}">{{.Title}}</a></td>
+  <td>{{.Company}}</td>
+  <td>{{.Location}}</td>
+  <td>{{if .ExtractedSalary}}{{.ExtractedSalary}}{{else if .Salary}}{{.Salary}}{{else}}—{{end}}</td>
+  <td><span class="status-badge status-{{.Status}}">{{.Status}}</span></td>
+  <td>{{applicationStatusDate .}}</td>
+  <td>{{.DiscoveredAt.Format "Jan 2, 2006"}}</td>
+  <td>
+    <select name="application_status"
+            hx-post="/api/jobs/{{.ID}}/application-status"
+            hx-target="#job-row-{{.ID}}"
+            hx-swap="outerHTML"
+            hx-include="this">
+      <option value="">— set status —</option>
+      <option value="applied"      {{if eq .ApplicationStatus "applied"}}selected{{end}}>Applied</option>
+      <option value="interviewing" {{if eq .ApplicationStatus "interviewing"}}selected{{end}}>Interviewing</option>
+      <option value="lost"         {{if eq .ApplicationStatus "lost"}}selected{{end}}>Lost</option>
+      <option value="won"          {{if eq .ApplicationStatus "won"}}selected{{end}}>Won</option>
+    </select>
+    {{if eq .Status "complete"}}
+    <a href="/jobs/{{.ID}}" role="button" class="outline btn-sm">View</a>
+    {{end}}
+  </td>
+</tr>
+{{if .Summary}}
+<tr class="job-summary-row"><td colspan="8">{{.Summary}}</td></tr>
+{{end}}
+{{end}}
+{{end}}
+{{end}}

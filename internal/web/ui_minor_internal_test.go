@@ -58,6 +58,10 @@ func (m *uiMinorJobStore) UpdateJobStatus(_ context.Context, _ int64, _ int64, _
 	return nil
 }
 
+func (m *uiMinorJobStore) UpdateApplicationStatus(_ context.Context, _ int64, _ int64, _ models.ApplicationStatus) error {
+	return nil
+}
+
 // ─── helper: build a Server and serve one GET / request with an auth'd user ──
 
 // dashboardWithUser builds a Server, wraps its handler with a middleware that

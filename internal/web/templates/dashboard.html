@@ -7,16 +7,6 @@
 <h1>Job Listings</h1>
 
 <div class="tab-bar">
-  {{range $status := .Statuses}}
-  <a href="?status={{$status}}" role="button"
-     class="{{if eq $status $.ActiveStatus}}contrast{{else}}outline{{end}}"
-     hx-get="/partials/job-table?status={{$status}}"
-     hx-target="#job-table-body"
-     hx-swap="innerHTML"
-     hx-push-url="true">
-    {{$status}}
-  </a>
-  {{end}}
   <a href="/" role="button"
      class="{{if eq $.ActiveStatus ""}}contrast{{else}}outline{{end}}"
      hx-get="/partials/job-table"
@@ -24,6 +14,22 @@
      hx-swap="innerHTML"
      hx-push-url="true">
     all
+  </a>
+  <a href="?status=discovered" role="button"
+     class="{{if eq $.ActiveStatus "discovered"}}contrast{{else}}outline{{end}}"
+     hx-get="/partials/job-table?status=discovered"
+     hx-target="#job-table-body"
+     hx-swap="innerHTML"
+     hx-push-url="true">
+    discovered
+  </a>
+  <a href="?status=notified" role="button"
+     class="{{if eq $.ActiveStatus "notified"}}contrast{{else}}outline{{end}}"
+     hx-get="/partials/job-table?status=notified"
+     hx-target="#job-table-body"
+     hx-swap="innerHTML"
+     hx-push-url="true">
+    notified
   </a>
 </div>
 

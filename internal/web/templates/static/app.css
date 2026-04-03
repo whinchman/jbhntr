@@ -280,6 +280,12 @@ h1, h2, h3, h4, h5, h6 {
 .status-complete    { background: var(--color-teal-bg);     color: var(--color-teal);    }
 .status-failed      { background: var(--color-danger-bg);   color: var(--color-danger);  }
 
+/* Application status badge classes */
+.status-applied      { background: var(--color-info-bg);    color: var(--color-info);    }
+.status-interviewing { background: var(--color-warning-bg); color: var(--color-warning); }
+.status-won          { background: var(--color-success-bg); color: var(--color-success); }
+.status-lost         { background: var(--color-danger-bg);  color: var(--color-danger);  }
+
 
 /* =============================================================================
    5. TAB BAR
