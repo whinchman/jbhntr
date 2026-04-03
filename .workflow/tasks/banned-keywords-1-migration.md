@@ -15,7 +15,7 @@ These two steps are grouped together because the model is trivially small and al
 
 ## Acceptance Criteria
 
-- [ ] Migration file `internal/store/migrations/011_add_user_banned_terms.sql` exists and is correct
+- [ ] Migration file `internal/store/migrations/012_add_user_banned_terms.sql` exists and is correct
 - [ ] Migration creates table `user_banned_terms` with columns: `id BIGSERIAL PK`, `user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE`, `term TEXT NOT NULL`, `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
 - [ ] Migration creates `UNIQUE (user_id, term)` constraint
 - [ ] Migration creates index `idx_user_banned_terms_user` on `user_id`
@@ -29,7 +29,7 @@ None — this task produces the foundational schema and model that all other tas
 ## Context
 
 File to create:
-- `internal/store/migrations/011_add_user_banned_terms.sql` (NEW)
+- `internal/store/migrations/012_add_user_banned_terms.sql` (NEW)
 
 File to modify:
 - `internal/models/user.go` — add `UserBannedTerm` alongside the existing `UserSearchFilter` struct
