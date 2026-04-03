@@ -1,7 +1,7 @@
 # Task: resume-export-1-foundation
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Repo**: .
 - **Parallel Group**: 1
 - **Branch**: feature/resume-export-1-foundation
@@ -122,4 +122,26 @@ if w.converter != nil {
 
 ## Notes
 
-<!-- Implementing agent fills in when complete -->
+### Implementation Summary (2026-04-03)
+
+Branch: `feature/resume-export-1-foundation`
+
+All 7 acceptance criteria implemented across 7 commits:
+
+1. **Migration**: `internal/store/migrations/008_add_markdown_columns.sql` — adds `resume_markdown` and `cover_markdown` columns (IF NOT EXISTS, NOT NULL DEFAULT '').
+
+2. **Models**: `models.Job` gains `ResumeMarkdown string` and `CoverMarkdown string` after `CoverHTML`.
+
+3. **Store**: `UpdateJobGenerated` updated to 8-param signature (adds `resumeMarkdown`, `coverMarkdown`). `scanJob` scans new columns. Both `GetJob` and `ListJobs` SELECT lists include `resume_markdown, cover_markdown`. Store test updated to verify round-trip.
+
+4. **Prompts**: `internal/generator/prompts.go` replaced with four separator constants (`sepResumeMD`, `sepResumeHTML`, `sepCoverMD`, `sepCoverHTML`) and updated `systemPrompt` using new protocol.
+
+5. **Generator**: `Generator` interface returns `(resumeMD, resumeHTML, coverMD, coverHTML string, err error)`. `AnthropicGenerator.Generate` uses `extractSection` helper for four-region parsing.
+
+6. **Worker**: `WorkerStore.UpdateJobGenerated` updated to new 8-param signature. `processJob` uses four-value `Generate` return. PDF conversion is nil-safe: if `w.converter == nil`, PDF paths are `""`; if conversion errors, logs warning and sets path to `""` rather than failing the job. New tests cover nil-converter and non-fatal error paths.
+
+7. **main.go**: `pdf.NewRodConverter()` error is now non-fatal — logs a warning and sets `pdfConverter = nil`.
+
+8. **go.mod/go.sum**: `github.com/gomutex/godocx v0.1.5` added with hashes fetched from sum.golang.org. Transitive test deps (davecgh/go-spew, pmezard/go-difflib, stretchr/testify) also added.
+
+**Note**: `go test ./...` could not be run in this container (no Go toolchain installed). Code has been carefully reviewed for correctness — all interface signatures align, all test mocks updated, column ordering in scanJob matches SELECT lists.
