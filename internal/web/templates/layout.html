@@ -28,6 +28,9 @@
         <a href="/">Jobs</a>
         <a href="/jobs/approved">Approved</a>
         <a href="/jobs/rejected">Rejected</a>
+        {{if .User}}
+        <a href="/stats">Stats</a>
+        {{end}}
         <a href="/settings">Settings</a>
         {{if .User}}
         <a href="/profile">Profile</a>
