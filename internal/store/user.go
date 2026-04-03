@@ -15,6 +15,10 @@ import (
 // is already registered.
 var ErrEmailTaken = errors.New("store: email already taken")
 
+// ErrDuplicateBannedTerm is returned by CreateUserBannedTerm when the user
+// already has the given term in their banned-keywords list.
+var ErrDuplicateBannedTerm = errors.New("store: banned term already exists for user")
+
 // userSelectCols is the canonical column list used in every SELECT on users.
 // It must stay in sync with scanUser.
 const userSelectCols = `id, provider, provider_id, email, display_name, avatar_url,
@@ -540,6 +544,91 @@ func (s *Store) ListAllFilters(ctx context.Context) ([]AdminFilter, error) {
 		filters = append(filters, f)
 	}
 	return filters, rows.Err()
+}
+
+// CreateUserBannedTerm inserts a new banned term for the given user.
+// Returns ErrDuplicateBannedTerm if the (user_id, term) pair already exists.
+func (s *Store) CreateUserBannedTerm(ctx context.Context, userID int64, term string) (*models.UserBannedTerm, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO user_banned_terms (user_id, term)
+		VALUES ($1, $2)
+		RETURNING id`,
+		userID, term,
+	).Scan(&id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicateBannedTerm
+		}
+		return nil, fmt.Errorf("store: create user banned term: %w", err)
+	}
+
+	bt := &models.UserBannedTerm{
+		ID:        id,
+		UserID:    userID,
+		Term:      term,
+		CreatedAt: time.Now().UTC(),
+	}
+	return bt, nil
+}
+
+// ListUserBannedTerms returns all banned terms for the given user ordered by
+// created_at DESC.
+func (s *Store) ListUserBannedTerms(ctx context.Context, userID int64) ([]models.UserBannedTerm, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, term, created_at
+		FROM user_banned_terms
+		WHERE user_id = $1
+		ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list user banned terms: %w", err)
+	}
+	defer rows.Close()
+
+	var terms []models.UserBannedTerm
+	for rows.Next() {
+		bt, err := scanUserBannedTerm(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: list user banned terms scan: %w", err)
+		}
+		terms = append(terms, *bt)
+	}
+	return terms, rows.Err()
+}
+
+// DeleteUserBannedTerm deletes a banned term by ID, scoped to the given user.
+// Returns an error if the term does not exist or does not belong to the user.
+func (s *Store) DeleteUserBannedTerm(ctx context.Context, userID int64, termID int64) error {
+	res, err := s.db.ExecContext(ctx,
+		"DELETE FROM user_banned_terms WHERE id = $1 AND user_id = $2",
+		termID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: delete user banned term: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete user banned term rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: banned term %d not found for user %d", termID, userID)
+	}
+	return nil
+}
+
+// scanUserBannedTerm scans a single user_banned_terms row.
+func scanUserBannedTerm(s scanner) (*models.UserBannedTerm, error) {
+	var bt models.UserBannedTerm
+	var createdAt string
+	err := s.Scan(&bt.ID, &bt.UserID, &bt.Term, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+		bt.CreatedAt = t
+	}
+	return &bt, nil
 }
 
 // isUniqueViolation returns true if err is a PostgreSQL unique constraint
