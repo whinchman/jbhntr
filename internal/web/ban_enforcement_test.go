@@ -10,8 +10,11 @@ package web_test
 //   - handleOAuthCallback: banned user in DB after upsert → redirect to /login with flash
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"testing"
@@ -276,4 +279,135 @@ func TestRequireAuth_ActiveUser_NotEvicted(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200 for non-banned active user", resp.StatusCode)
 	}
+}
+
+// ─── handleOAuthCallback: banned user blocked ─────────────────────────────────
+
+// TestBanEnforcementOAuth verifies that a banned user who completes the OAuth
+// flow is redirected to /login with a "suspended" flash and does NOT receive
+// an authenticated session. This test uses a real in-memory SQLite store and
+// a mock OAuth provider to simulate the full callback round-trip.
+func TestBanEnforcementOAuth(t *testing.T) {
+	// Profile used for both the "first login" (creates user) and the "banned login".
+	profile := providerProfile{
+		ID:          "oauth-banned-001",
+		Email:       "banned-oauth@example.com",
+		DisplayName: "Banned OAuth User",
+		AvatarURL:   "",
+	}
+
+	ts, db := newIntegrationServer(t, "google", profile)
+
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	// ── Step 1: first login — user is created in DB and initially active. ──
+	state1 := extractOAuthState(t, client, ts.URL, "google")
+	callbackURL1 := fmt.Sprintf("%s/auth/google/callback?code=test-code&state=%s", ts.URL, url.QueryEscape(state1))
+	resp1, err := client.Get(callbackURL1)
+	if err != nil {
+		t.Fatalf("first callback: %v", err)
+	}
+	resp1.Body.Close()
+	if resp1.StatusCode != http.StatusSeeOther {
+		t.Fatalf("first callback: got %d, want 303", resp1.StatusCode)
+	}
+
+	// ── Step 2: ban the user via the admin store method. ──
+	user, err := db.GetUserByProvider(context.Background(), "google", "oauth-banned-001")
+	if err != nil {
+		t.Fatalf("GetUserByProvider: %v", err)
+	}
+	if err := db.BanUser(context.Background(), user.ID); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	// ── Step 3: clear cookies so we start a fresh login attempt as banned user. ──
+	jar2, _ := cookiejar.New(nil)
+	client2 := &http.Client{
+		Jar: jar2,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	// ── Step 4: go through OAuth flow again — same provider profile (banned user). ──
+	state2 := extractOAuthState(t, client2, ts.URL, "google")
+	callbackURL2 := fmt.Sprintf("%s/auth/google/callback?code=test-code&state=%s", ts.URL, url.QueryEscape(state2))
+	resp2, err := client2.Get(callbackURL2)
+	if err != nil {
+		t.Fatalf("banned callback: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	// Should redirect to /login.
+	if resp2.StatusCode != http.StatusSeeOther {
+		body, _ := io.ReadAll(resp2.Body)
+		t.Fatalf("banned callback: got %d, want 303; body=%s", resp2.StatusCode, body)
+	}
+	if loc := resp2.Header.Get("Location"); loc != "/login" {
+		t.Errorf("banned callback Location = %q, want /login", loc)
+	}
+
+	// ── Step 5: follow to /login and verify the suspension flash is present. ──
+	loginResp, err := client2.Get(ts.URL + "/login")
+	if err != nil {
+		t.Fatalf("GET /login after banned OAuth callback: %v", err)
+	}
+	defer loginResp.Body.Close()
+	body, _ := io.ReadAll(loginResp.Body)
+	if !strings.Contains(string(body), "suspended") {
+		t.Errorf("expected 'suspended' flash on /login after banned OAuth user; body snippet: %q", truncate(string(body), 500))
+	}
+
+	// ── Step 6: verify no authenticated session was created for the banned user. ──
+	// Access a requireAuth route with client2's cookies; should still redirect to /login.
+	protectedResp, err := client2.Get(ts.URL + "/settings")
+	if err != nil {
+		t.Fatalf("GET /settings after banned OAuth callback: %v", err)
+	}
+	defer protectedResp.Body.Close()
+	if protectedResp.StatusCode != http.StatusSeeOther {
+		t.Errorf("GET /settings: got %d, want 303 (no session for banned user)", protectedResp.StatusCode)
+	}
+	if loc := protectedResp.Header.Get("Location"); loc != "/login" {
+		t.Errorf("GET /settings Location = %q, want /login", loc)
+	}
+}
+
+// extractOAuthState starts the OAuth flow and returns the state parameter
+// extracted from the provider redirect URL.
+func extractOAuthState(t *testing.T, client *http.Client, baseURL, provider string) string {
+	t.Helper()
+	resp, err := client.Get(baseURL + "/auth/" + provider)
+	if err != nil {
+		t.Fatalf("GET /auth/%s: %v", provider, err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("/auth/%s: got %d, want 307", provider, resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	parsed, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse Location %q: %v", loc, err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("/auth/%s: no state parameter in redirect URL %q", provider, loc)
+	}
+	return state
+}
+
+// truncate returns the first n bytes of s (for diagnostic output).
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }

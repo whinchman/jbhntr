@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+	"time"
+	"unicode"
 
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/store"
@@ -30,6 +35,94 @@ func (m *mockAdminStore) ListAllFilters(_ context.Context) ([]store.AdminFilter,
 }
 func (m *mockAdminStore) GetAdminStats(_ context.Context) (store.AdminStats, error) {
 	return store.AdminStats{TotalUsers: 1, TotalJobs: 2, TotalFilters: 3, NewUsersLast7d: 0}, nil
+}
+
+// ─── recordingAdminStore tracks calls for verification ───────────────────────
+
+type recordingAdminStore struct {
+	mu sync.Mutex
+
+	users   []models.User
+	filters []store.AdminFilter
+	stats   store.AdminStats
+
+	// recorded calls
+	bannedIDs         []int64
+	unbannedIDs       []int64
+	passwordResets    []passwordResetCall
+}
+
+type passwordResetCall struct {
+	userID int64
+	hash   string
+}
+
+func newRecordingStore(users []models.User, filters []store.AdminFilter, stats store.AdminStats) *recordingAdminStore {
+	return &recordingAdminStore{users: users, filters: filters, stats: stats}
+}
+
+func (s *recordingAdminStore) ListAllUsers(_ context.Context) ([]models.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]models.User(nil), s.users...), nil
+}
+
+func (s *recordingAdminStore) BanUser(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bannedIDs = append(s.bannedIDs, id)
+	return nil
+}
+
+func (s *recordingAdminStore) UnbanUser(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unbannedIDs = append(s.unbannedIDs, id)
+	return nil
+}
+
+func (s *recordingAdminStore) SetPasswordHash(_ context.Context, id int64, hash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.passwordResets = append(s.passwordResets, passwordResetCall{userID: id, hash: hash})
+	return nil
+}
+
+func (s *recordingAdminStore) ListAllFilters(_ context.Context) ([]store.AdminFilter, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]store.AdminFilter(nil), s.filters...), nil
+}
+
+func (s *recordingAdminStore) GetAdminStats(_ context.Context) (store.AdminStats, error) {
+	return s.stats, nil
+}
+
+func (s *recordingAdminStore) lastBannedID() (int64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.bannedIDs) == 0 {
+		return 0, false
+	}
+	return s.bannedIDs[len(s.bannedIDs)-1], true
+}
+
+func (s *recordingAdminStore) lastUnbannedID() (int64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.unbannedIDs) == 0 {
+		return 0, false
+	}
+	return s.unbannedIDs[len(s.unbannedIDs)-1], true
+}
+
+func (s *recordingAdminStore) lastPasswordReset() (passwordResetCall, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.passwordResets) == 0 {
+		return passwordResetCall{}, false
+	}
+	return s.passwordResets[len(s.passwordResets)-1], true
 }
 
 // basicAuth returns an HTTP Basic Auth header value.
@@ -259,5 +352,230 @@ func TestAdminInvalidUserID(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("invalid id: got status %d, want 400", resp.StatusCode)
+	}
+}
+
+// ─── new tests covering store-call verification and HTML content ──────────────
+
+// TestAdminDashboardContainsStats verifies that GET /admin renders stat values
+// from the store into the HTML response body.
+func TestAdminDashboardContainsStats(t *testing.T) {
+	stats := store.AdminStats{TotalUsers: 42, TotalJobs: 99, TotalFilters: 7, NewUsersLast7d: 3}
+	rs := newRecordingStore(nil, nil, stats)
+	handler := admin.New(rs, "pass")
+	srv := httptest.NewServer(handler.Routes())
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/", nil)
+	req.Header.Set("Authorization", basicAuth("admin", "pass"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("dashboard request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("dashboard: got %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+	for _, want := range []string{"42", "99", "7", "3"} {
+		if !strings.Contains(bodyStr, want) {
+			t.Errorf("dashboard body missing stat value %q", want)
+		}
+	}
+}
+
+// TestAdminUsersListContainsUser verifies that GET /admin/users lists seeded
+// users by rendering their email addresses in the HTML table.
+func TestAdminUsersListContainsUser(t *testing.T) {
+	users := []models.User{
+		{ID: 1, Email: "alice@example.com", DisplayName: "Alice", CreatedAt: time.Now()},
+		{ID: 2, Email: "bob@example.com", DisplayName: "Bob", CreatedAt: time.Now()},
+	}
+	rs := newRecordingStore(users, nil, store.AdminStats{})
+	handler := admin.New(rs, "pass")
+	srv := httptest.NewServer(handler.Routes())
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/users", nil)
+	req.Header.Set("Authorization", basicAuth("admin", "pass"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("users request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("users: got %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+	for _, email := range []string{"alice@example.com", "bob@example.com"} {
+		if !strings.Contains(bodyStr, email) {
+			t.Errorf("users body missing email %q", email)
+		}
+	}
+}
+
+// TestAdminBanCallsStore verifies that POST /admin/users/{id}/ban calls
+// the store's BanUser method with the correct user ID.
+func TestAdminBanCallsStore(t *testing.T) {
+	rs := newRecordingStore(nil, nil, store.AdminStats{})
+	handler := admin.New(rs, "pass")
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	srv := httptest.NewServer(handler.Routes())
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/users/7/ban", nil)
+	req.Header.Set("Authorization", basicAuth("admin", "pass"))
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("ban request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("ban: got %d, want 303", resp.StatusCode)
+	}
+	id, ok := rs.lastBannedID()
+	if !ok {
+		t.Fatal("BanUser was not called on the store")
+	}
+	if id != 7 {
+		t.Errorf("BanUser called with id=%d, want 7", id)
+	}
+}
+
+// TestAdminUnbanCallsStore verifies that POST /admin/users/{id}/unban calls
+// the store's UnbanUser method with the correct user ID.
+func TestAdminUnbanCallsStore(t *testing.T) {
+	rs := newRecordingStore(nil, nil, store.AdminStats{})
+	handler := admin.New(rs, "pass")
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	srv := httptest.NewServer(handler.Routes())
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/users/9/unban", nil)
+	req.Header.Set("Authorization", basicAuth("admin", "pass"))
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unban request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("unban: got %d, want 303", resp.StatusCode)
+	}
+	id, ok := rs.lastUnbannedID()
+	if !ok {
+		t.Fatal("UnbanUser was not called on the store")
+	}
+	if id != 9 {
+		t.Errorf("UnbanUser called with id=%d, want 9", id)
+	}
+}
+
+// TestAdminResetPasswordCallsStoreAndShowsTempPassword verifies that
+// POST /admin/users/{id}/reset-password calls SetPasswordHash and renders
+// the 12-character alphanumeric temp password in the HTML response body.
+func TestAdminResetPasswordCallsStoreAndShowsTempPassword(t *testing.T) {
+	rs := newRecordingStore(nil, nil, store.AdminStats{})
+	handler := admin.New(rs, "pass")
+	srv := httptest.NewServer(handler.Routes())
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/users/5/reset-password", srv.URL), nil)
+	req.Header.Set("Authorization", basicAuth("admin", "pass"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("reset-password request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reset-password: got %d, want 200", resp.StatusCode)
+	}
+
+	// Verify SetPasswordHash was called for the correct user.
+	call, ok := rs.lastPasswordReset()
+	if !ok {
+		t.Fatal("SetPasswordHash was not called on the store")
+	}
+	if call.userID != 5 {
+		t.Errorf("SetPasswordHash called for user %d, want 5", call.userID)
+	}
+	if call.hash == "" {
+		t.Error("SetPasswordHash called with empty hash")
+	}
+
+	// The rendered page should contain the temp password (12-char alphanumeric).
+	// The handler writes the plaintext temp password into the template, so it
+	// appears verbatim in the HTML <code> block.
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	// Extract the temp password from the response by looking for a 12-character
+	// alphanumeric run that appears between <code> tags.
+	codeIdx := strings.Index(bodyStr, "<code>")
+	if codeIdx < 0 {
+		t.Fatal("response body missing <code> tag for temp password")
+	}
+	start := codeIdx + len("<code>")
+	end := strings.Index(bodyStr[start:], "</code>")
+	if end < 0 {
+		t.Fatal("response body missing </code> closing tag")
+	}
+	tmp := bodyStr[start : start+end]
+	if len(tmp) != 12 {
+		t.Errorf("temp password length = %d, want 12; got %q", len(tmp), tmp)
+	}
+	for _, ch := range tmp {
+		if !unicode.IsLetter(ch) && !unicode.IsDigit(ch) {
+			t.Errorf("temp password %q contains non-alphanumeric character %q", tmp, ch)
+		}
+	}
+}
+
+// TestAdminFiltersContainsFilter verifies that GET /admin/filters lists
+// seeded filters by rendering their user emails in the HTML table.
+func TestAdminFiltersContainsFilter(t *testing.T) {
+	filters := []store.AdminFilter{
+		{
+			UserSearchFilter: models.UserSearchFilter{
+				ID:       1,
+				UserID:   1,
+				Keywords: "golang",
+				Location: "Remote",
+				Title:    "Engineer",
+				CreatedAt: time.Now(),
+			},
+			UserEmail: "filter-owner@example.com",
+		},
+	}
+	rs := newRecordingStore(nil, filters, store.AdminStats{})
+	handler := admin.New(rs, "pass")
+	srv := httptest.NewServer(handler.Routes())
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/filters", nil)
+	req.Header.Set("Authorization", basicAuth("admin", "pass"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("filters request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("filters: got %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "filter-owner@example.com") {
+		t.Error("filters body missing user email 'filter-owner@example.com'")
+	}
+	if !strings.Contains(bodyStr, "golang") {
+		t.Error("filters body missing keyword 'golang'")
 	}
 }
