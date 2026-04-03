@@ -8,6 +8,39 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-029: [job-pipeline] branch 4 rejected_jobs.html references /partials/rejected-job-table which is never registered
+
+- File: `internal/web/templates/rejected_jobs.html` (branch 4), search `<input>` and column `<th>` elements
+- Severity: warning (broken search and sort on the rejected page when branch 4 template is used)
+- Branch: feature/job-pipeline-4-templates
+- Description: The branch 4 `rejected_jobs.html` template wires the search input and all sortable column headers to `hx-get="/partials/rejected-job-table"`. No handler for `GET /partials/rejected-job-table` is registered in either `feature/job-pipeline-3-web` or `feature/job-pipeline-4-templates`. Every search keystroke and every column-header click will return a 404, causing HTMX to show an error. The branch 3 version avoids this by rendering a static table with no HTMX interactions.
+- Reproduction: Merge branch 4 templates, navigate to `/jobs/rejected`, type in the search box or click a column header — HTMX returns 404.
+- Fix: Either (a) add a `handleRejectedJobTablePartial` handler and register `GET /partials/rejected-job-table` in the optionalAuth group (mirroring `handleApprovedJobTablePartial`), or (b) use the branch 3 static-table version of `rejected_jobs.html` which has no HTMX search/sort.
+
+---
+
+## BUG-028: [job-pipeline] branch 4 approved_job_rows.html has 8 row cells but approved_jobs.html header has 7 columns
+
+- File: `internal/web/templates/partials/approved_job_rows.html` (branch 4), `internal/web/templates/approved_jobs.html` (branch 4)
+- Severity: warning (visual column misalignment; colspan mismatch on empty row)
+- Branch: feature/job-pipeline-4-templates
+- Description: The branch 4 `approved_job_rows.html` template renders **8 `<td>` cells** per row (Title, Company, Location, Salary, Status, `applicationStatusDate`, `DiscoveredAt`, Application-select) and declares `colspan="8"` on the empty-state row. The `approved_jobs.html` header generates **7 `<th>` elements** (6 from `{{range .Columns}}` via `buildColumns()` + 1 `<th>Application Status</th>`). The `applicationStatusDate` cell (column 6) has no corresponding header — the header labels shift one column to the left relative to the data, and the empty-state `colspan="8"` is one wider than the actual header.
+- Reproduction: Navigate to `/jobs/approved` with no approved jobs — the "No jobs found" cell spans 8 columns but only 7 headers exist. With jobs present, the "applicationStatusDate" value aligns under the `discovered_at` header label.
+- Fix: Add a `<th>Status Date</th>` (or similar) between the last `{{range .Columns}}` header and `<th>Application Status</th>` in `approved_jobs.html` (branch 4), **or** drop the dedicated `applicationStatusDate` column from `approved_job_rows.html` and fold that data into the Application-select cell.
+
+---
+
+## BUG-027: [job-pipeline] branch 3 rejected_jobs.html uses job_rows partial which renders 7 columns into a 5-column header
+
+- File: `internal/web/templates/rejected_jobs.html` (branch 3), `internal/web/templates/partials/job_rows.html`
+- Severity: warning (visual layout broken — column content does not align with headers)
+- Branch: feature/job-pipeline-3-web
+- Description: The branch 3 `rejected_jobs.html` renders `{{template "job_rows" .Jobs}}` which outputs 7 `<td>` cells per row (Title, Company, Location, Salary, Status-badge, Date, Actions) and a `colspan="7"` empty-state row. The table `<thead>` in `rejected_jobs.html` only defines 5 `<th>` columns (Title, Company, Location, Salary, Date). This creates a 2-column misalignment — the Status and Actions cells have no headers — and the empty-state row is 2 columns wider than the header row. Also, the `job_rows` partial includes Approve/Reject action buttons that are never rendered for rejected-status jobs, wasting template parsing with an irrelevant partial.
+- Reproduction: Navigate to `/jobs/rejected` — observe that the "No jobs found" empty-state row is wider than the header, and with jobs present the Status column has no header.
+- Fix: Replace the `{{template "job_rows" .Jobs}}` include in `rejected_jobs.html` (branch 3) with an inline row loop matching the 5-column header, or update the header to match all 7 columns that `job_rows` renders. The branch 4 version of `rejected_jobs.html` handles this correctly with a self-contained inline loop and a matching 6-column header.
+
+---
+
 ## BUG-026: [job-pipeline] mockJobStore.ListJobs does not filter by ApplicationStatus
 
 - File: `internal/web/server_test.go`, lines 51–65
