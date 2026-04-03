@@ -23,10 +23,10 @@
   <form method="POST" action="/profile">
     <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
     <div class="inline-form">
-      <label>
-        Display name
-        <input type="text" name="display_name" value="{{.User.DisplayName}}" maxlength="100" required>
-      </label>
+      <div class="inline-form-field">
+        <label for="display_name">Display name</label>
+        <input type="text" id="display_name" name="display_name" value="{{.User.DisplayName}}" maxlength="100" required>
+      </div>
       <button type="submit">Save</button>
     </div>
   </form>

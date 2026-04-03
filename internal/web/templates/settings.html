@@ -29,7 +29,7 @@
       <tr>
         <td>{{$f.Keywords}}</td>
         <td>{{if $f.Location}}{{$f.Location}}{{else}}—{{end}}</td>
-        <td>{{if $f.MinSalary}}${{$f.MinSalary}}{{else}}—{{end}}</td>
+        <td>{{if $f.MinSalary}}{{commaDollars $f.MinSalary}}{{else}}—{{end}}</td>
         <td>
           <button hx-post="/settings/filters/remove?id={{$f.ID}}"
                   hx-target="body"
@@ -58,7 +58,9 @@
       </label>
       <label>
         Min Salary
-        <input type="number" name="min_salary" placeholder="e.g. 150000" min="0">
+        <div class="input-currency">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" name="min_salary" placeholder="150,000">
+        </div>
       </label>
       <button type="submit">Add</button>
     </div>

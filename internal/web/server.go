@@ -131,19 +131,39 @@ func NewServer(st JobStore) *Server {
 	return NewServerWithConfig(st, nil, nil, nil)
 }
 
+// commaDollars formats an integer as a USD currency string, e.g. 150000 → "$150,000".
+func commaDollars(n int) string {
+	if n == 0 {
+		return "—"
+	}
+	s := strconv.Itoa(n)
+	out := make([]byte, 0, len(s)+(len(s)-1)/3)
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, byte(c))
+	}
+	return "$" + string(out)
+}
+
+var tmplFuncs = template.FuncMap{
+	"commaDollars": commaDollars,
+}
+
 // NewServerWithConfig constructs a Server with config, auth, and filter store.
 // Pass nil cfg or nil userStore/filterStore to disable settings/auth.
 func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.Config) *Server {
-	tmpl := template.Must(template.ParseFS(templateFS,
+	tmpl := template.Must(template.New("layout.html").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html",
 		"templates/dashboard.html",
 		"templates/partials/job_rows.html",
 	))
-	detail := template.Must(template.ParseFS(templateFS,
+	detail := template.Must(template.New("layout.html").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html",
 		"templates/job_detail.html",
 	))
-	settings := template.Must(template.ParseFS(templateFS,
+	settings := template.Must(template.New("layout.html").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html",
 		"templates/settings.html",
 	))

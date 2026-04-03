@@ -117,6 +117,11 @@
    2. LAYOUT — BODY AND CONTAINER
    ============================================================================= */
 
+html {
+  background-color: var(--color-bg);
+  color-scheme: light;
+}
+
 body {
   background-color: var(--color-bg);
   color: var(--color-text);
@@ -125,6 +130,10 @@ body {
   line-height: var(--leading-normal);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--color-text);
 }
 
 .app-container {
@@ -226,18 +235,22 @@ body {
   text-decoration: underline;
 }
 
-/* Mobile nav collapse — user area wraps below brand/links */
+/* Mobile nav collapse — stack brand, links, user vertically and center */
 @media (max-width: 639px) {
   .app-nav-inner {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: var(--space-2);
+  }
+  .app-nav-links {
+    justify-content: center;
   }
   .app-nav-user {
     margin-left: 0;
     border-top: 1px solid var(--color-border);
     padding-top: var(--space-2);
     width: 100%;
+    justify-content: center;
   }
 }
 
@@ -325,6 +338,21 @@ body {
   -webkit-overflow-scrolling: touch;
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
+}
+
+/* On small screens hide low-priority columns and kill the scrollbar */
+@media (max-width: 639px) {
+  .job-table-wrapper {
+    overflow-x: visible;
+  }
+  .job-table th:nth-child(3),
+  .job-table td:nth-child(3),
+  .job-table th:nth-child(4),
+  .job-table td:nth-child(4),
+  .job-table th:nth-child(6),
+  .job-table td:nth-child(6) {
+    display: none;
+  }
 }
 
 .job-table {
@@ -455,9 +483,34 @@ textarea.mono {
   align-items: flex-end;
   max-width: 480px;
 }
-.inline-form label {
+.inline-form-field {
   flex: 1;
-  margin-bottom: 0;
+  min-width: 0;
+}
+.inline-form-field label {
+  margin-bottom: var(--space-1);
+}
+.inline-form-field input {
+  width: 100%;
+}
+
+/* currency prefix wrapper */
+.input-currency {
+  position: relative;
+}
+.input-currency::before {
+  content: "$";
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  font-size: var(--text-sm);
+  z-index: 1;
+}
+.input-currency input {
+  padding-left: 1.5rem;
 }
 
 
