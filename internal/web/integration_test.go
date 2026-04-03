@@ -678,3 +678,205 @@ func TestIntegration_PerUserSettings(t *testing.T) {
 		}
 	})
 }
+
+// ─── Stats page integration tests ─────────────────────────────────────────────
+
+// TestStatsPage_Unauthenticated verifies that GET /stats redirects to /login
+// when no session cookie is present (integration-level, real store).
+func TestStatsPage_Unauthenticated(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{BaseURL: "http://localhost"},
+		Auth: config.AuthConfig{
+			SessionSecret: "integration-test-secret-at-least-32-bytes!",
+			Providers: config.ProvidersConfig{
+				Google: config.OAuthProviderConfig{ClientID: "test", ClientSecret: "test"},
+			},
+		},
+	}
+	srv := web.NewServerWithConfig(db, db, db, cfg).WithStatsStore(db)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	client := noRedirectClient()
+	resp, err := client.Get(ts.URL + "/stats")
+	if err != nil {
+		t.Fatalf("GET /stats: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
+		t.Errorf("status = %d, want 3xx redirect", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if loc != "/login" {
+		t.Errorf("Location = %q, want /login", loc)
+	}
+}
+
+// TestStatsPage_Authenticated verifies that an authenticated user receives a
+// 200 response with the stats page rendered (integration-level, real store).
+func TestStatsPage_Authenticated(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	ctx := context.Background()
+	user, err := db.UpsertUser(ctx, &models.User{
+		Provider: "google", ProviderID: "stats-auth-1", Email: "statsauth@test.com",
+		DisplayName: "Stats User",
+	})
+	if err != nil {
+		t.Fatalf("upsert user: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{BaseURL: "http://localhost"},
+		Auth: config.AuthConfig{
+			SessionSecret: "integration-test-secret-at-least-32-bytes!",
+			Providers: config.ProvidersConfig{
+				Google: config.OAuthProviderConfig{ClientID: "test", ClientSecret: "test"},
+			},
+		},
+	}
+	srv := web.NewServerWithConfig(db, db, db, cfg).WithStatsStore(db)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	cookie := setIntegrationSessionCookie(t, user.ID)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/stats", nil)
+	req.AddCookie(cookie)
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET /stats: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, body)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "Job Search Stats") {
+		t.Error("response body missing 'Job Search Stats' heading")
+	}
+	if !strings.Contains(bodyStr, "Total Found") {
+		t.Error("response body missing 'Total Found' label")
+	}
+}
+
+// TestStatsPage_Counts seeds a known set of jobs for a user and verifies that
+// the rendered HTML contains the correct stat values (integration-level, real store).
+func TestStatsPage_Counts(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	ctx := context.Background()
+	user, err := db.UpsertUser(ctx, &models.User{
+		Provider: "google", ProviderID: "stats-counts-1", Email: "statscounts@test.com",
+		DisplayName: "Count Tester",
+	})
+	if err != nil {
+		t.Fatalf("upsert user: %v", err)
+	}
+
+	// Insert 3 discovered jobs.
+	for i := 0; i < 3; i++ {
+		j := &models.Job{
+			ExternalID: fmt.Sprintf("sc-disc-%d", i),
+			Source:     "test",
+			Title:      "Test Job",
+			Company:    "Acme",
+			Location:   "Remote",
+			Status:     models.StatusDiscovered,
+		}
+		if _, err := db.CreateJob(ctx, user.ID, j); err != nil {
+			t.Fatalf("CreateJob disc[%d]: %v", i, err)
+		}
+	}
+
+	// Insert 2 approved jobs and advance them to application_status=applied.
+	for i := 0; i < 2; i++ {
+		j := &models.Job{
+			ExternalID: fmt.Sprintf("sc-appr-%d", i),
+			Source:     "test",
+			Title:      "Approved Job",
+			Company:    "Acme",
+			Location:   "Remote",
+			Status:     models.StatusNotified,
+		}
+		if _, err := db.CreateJob(ctx, user.ID, j); err != nil {
+			t.Fatalf("CreateJob appr[%d]: %v", i, err)
+		}
+		if err := db.UpdateJobStatus(ctx, user.ID, j.ID, models.StatusApproved); err != nil {
+			t.Fatalf("UpdateJobStatus appr[%d]: %v", i, err)
+		}
+		if err := db.UpdateApplicationStatus(ctx, user.ID, j.ID, models.AppStatusApplied); err != nil {
+			t.Fatalf("UpdateApplicationStatus appr[%d]: %v", i, err)
+		}
+	}
+
+	// Total = 5 (3 discovered + 2 approved), TotalApproved = 2, TotalApplied = 2.
+	cfg := &config.Config{
+		Server: config.ServerConfig{BaseURL: "http://localhost"},
+		Auth: config.AuthConfig{
+			SessionSecret: "integration-test-secret-at-least-32-bytes!",
+			Providers: config.ProvidersConfig{
+				Google: config.OAuthProviderConfig{ClientID: "test", ClientSecret: "test"},
+			},
+		},
+	}
+	srv := web.NewServerWithConfig(db, db, db, cfg).WithStatsStore(db)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	cookie := setIntegrationSessionCookie(t, user.ID)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/stats", nil)
+	req.AddCookie(cookie)
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET /stats: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, body)
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyStr := string(bodyBytes)
+
+	// The template renders {{ .Stats.TotalFound }} — we seeded 5 jobs total.
+	// We look for the digit inside a stat-card, which contains the count as
+	// a bare integer node in the HTML.
+	if !strings.Contains(bodyStr, ">5<") {
+		t.Error("response body missing TotalFound value '5' inside a stat-card element")
+	}
+	// TotalApproved = 2.
+	if !strings.Contains(bodyStr, "Approved") {
+		t.Error("response body missing 'Approved' label")
+	}
+	// TotalApplied = 2: rendered value appears as bare '2' inside a stat-card.
+	if !strings.Contains(bodyStr, "Applied") {
+		t.Error("response body missing 'Applied' label")
+	}
+	// The 12-week bar chart is always rendered (12 columns).
+	if !strings.Contains(bodyStr, "bar-chart__col") {
+		t.Error("response body missing 'bar-chart__col' (weekly bar chart not rendered)")
+	}
+}
