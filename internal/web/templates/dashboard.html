@@ -41,30 +41,31 @@
      hx-trigger="every 30s"
      hx-target="#job-table-body"
      hx-swap="innerHTML">
-  <table>
-    <thead>
-      <tr>
-        {{- $base := printf "status=%s&q=%s" .ActiveStatus .Search -}}
-        {{- range .Columns -}}
-        <th style="cursor:pointer;user-select:none;"
-            hx-get="/partials/job-table?{{$base}}&sort={{.Key}}&order={{.NextOrder}}"
-            hx-target="#job-table-body"
-            hx-swap="innerHTML">
-          {{.Label}}{{if .Arrow}} {{.Arrow}}{{end}}
-        </th>
-        {{- end -}}
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="job-table-body">
-      {{template "job_rows" .Jobs}}
-    </tbody>
-  </table>
+  <div class="job-table-wrapper">
+    <table class="job-table">
+      <thead>
+        <tr>
+          {{- $base := printf "status=%s&q=%s" .ActiveStatus .Search -}}
+          {{- range .Columns -}}
+          <th hx-get="/partials/job-table?{{$base}}&sort={{.Key}}&order={{.NextOrder}}"
+              hx-target="#job-table-body"
+              hx-swap="innerHTML">
+            {{.Label}}{{if .Arrow}} {{.Arrow}}{{end}}
+          </th>
+          {{- end -}}
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="job-table-body">
+        {{template "job_rows" .Jobs}}
+      </tbody>
+    </table>
+  </div>
 </div>
 {{else}}
-<section style="text-align:center;padding:4rem 1rem;">
+<section class="hero">
   <h1>Track your job search, automatically.</h1>
-  <p style="max-width:40rem;margin:1rem auto;font-size:1.1rem;">
+  <p>
     JobHuntr discovers relevant job listings and automatically generates
     tailored resumes and cover letters — so you can focus on the
     interviews, not the applications.

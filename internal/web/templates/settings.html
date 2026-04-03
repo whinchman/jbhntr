@@ -6,7 +6,7 @@
 <h1>Settings</h1>
 
 {{if .Saved}}
-<div role="alert" style="background:#e8f5e9;color:#2e7d32;padding:0.75rem 1rem;border-radius:0.3em;margin-bottom:1rem;">
+<div role="alert" class="alert alert-success">
   Settings saved.
 </div>
 {{end}}
@@ -34,21 +34,20 @@
           <button hx-post="/settings/filters/remove?id={{$f.ID}}"
                   hx-target="body"
                   hx-push-url="true"
-                  class="outline secondary"
-                  style="padding:0.2em 0.6em;font-size:0.8em;">Remove</button>
+                  class="outline secondary btn-sm">Remove</button>
         </td>
       </tr>
       {{end}}
     </tbody>
   </table>
   {{else}}
-  <p style="color:#999;">No search filters configured.</p>
+  <p class="text-muted">No search filters configured.</p>
   {{end}}
 
   <h3>Add Filter</h3>
   <form method="POST" action="/settings/filters">
     <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;align-items:end;">
+    <div class="filter-form-grid">
       <label>
         Keywords
         <input type="text" name="keywords" placeholder="e.g. senior golang engineer" required>
@@ -76,12 +75,12 @@
       NTFY Topic
       <input type="text" name="ntfy_topic" value="{{.NtfyTopic}}" placeholder="e.g. jobhuntr-yourname">
     </label>
-    <small style="display:block;margin-top:0.25rem;color:#666;">
+    <small class="field-hint">
       Your <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a> topic name.
       Subscribe to this topic in the ntfy app to receive push notifications for new jobs.
       Leave blank to disable notifications.
     </small>
-    <button type="submit" style="margin-top:0.75rem;">Save Notifications</button>
+    <button type="submit">Save Notifications</button>
   </form>
 </section>
 
@@ -93,7 +92,7 @@
     <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
     <label>
       Resume content (Markdown)
-      <textarea name="resume" rows="20" style="font-family:monospace;font-size:0.9em;">{{.Resume}}</textarea>
+      <textarea name="resume" rows="20" class="mono">{{.Resume}}</textarea>
     </label>
     <button type="submit">Save Resume</button>
   </form>

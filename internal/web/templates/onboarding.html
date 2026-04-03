@@ -9,7 +9,7 @@
   </header>
 
   {{if .Error}}
-  <div role="alert" style="color:var(--pico-color-red-500);margin-bottom:1rem;">
+  <div role="alert" class="alert alert-danger">
     {{.Error}}
   </div>
   {{end}}
@@ -18,7 +18,7 @@
     <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
 
     <label for="display_name">
-      Display Name <span aria-hidden="true" style="color:var(--pico-color-red-500)">*</span>
+      Display Name <span aria-hidden="true" class="text-danger">*</span>
       <input
         type="text"
         id="display_name"
