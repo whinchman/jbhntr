@@ -14,10 +14,10 @@ import (
 
 // Config is the root configuration object.
 type Config struct {
-	Server   ServerConfig  `yaml:"server"`
-	Auth     AuthConfig    `yaml:"auth"`
+	Server   ServerConfig   `yaml:"server"`
+	Auth     AuthConfig     `yaml:"auth"`
 	Database DatabaseConfig `yaml:"database"`
-	Scraper  ScraperConfig `yaml:"scraper"`
+	Scraper  ScraperConfig  `yaml:"scraper"`
 	// SearchFilters holds global search filters parsed from the config file.
 	// Deprecated: per-user search filters are now stored in the database
 	// (user_search_filters table) and managed via the web UI. This field is
@@ -29,6 +29,15 @@ type Config struct {
 	// resumes are stored in the database (users.resume_markdown).
 	Resume ResumeConfig `yaml:"resume"`
 	Output OutputConfig `yaml:"output"`
+	// SMTP holds outbound email settings for the mailer.
+	// Example config:
+	//   smtp:
+	//     host: ${SMTP_HOST}
+	//     port: 587
+	//     username: ${SMTP_USERNAME}
+	//     password: ${SMTP_PASSWORD}
+	//     from: noreply@example.com
+	SMTP SMTPConfig `yaml:"smtp"`
 }
 
 // DatabaseConfig holds PostgreSQL connection settings.
@@ -39,10 +48,31 @@ type DatabaseConfig struct {
 	URL string `yaml:"url"`
 }
 
+// OAuthConfig holds top-level OAuth feature flags.
+// It is consumed in internal/web/server.go:
+//
+//	if cfg.Auth.OAuth.Enabled {
+//	    srv.oauthProviders = oauthProviders(cfg.Auth, cfg.Server.BaseURL)
+//	}
+type OAuthConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 // AuthConfig holds OAuth and session configuration.
 type AuthConfig struct {
 	SessionSecret string          `yaml:"session_secret"`
+	OAuth         OAuthConfig     `yaml:"oauth"`
 	Providers     ProvidersConfig `yaml:"providers"`
+}
+
+// SMTPConfig holds outbound email (SMTP) settings.
+// Values flow to mailer.NewSMTPMailer in main.go.
+type SMTPConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	From     string `yaml:"from"`
 }
 
 // ProvidersConfig holds per-provider OAuth credentials.
