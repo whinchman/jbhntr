@@ -1,150 +1,154 @@
 # JobHuntr
 
-JobHuntr is a headless Go application that automates job searching, delivers
-push notifications, and generates tailored resumes and cover letters using the
-Claude API.
+JobHuntr is a multi-user Go web application that automates job searching,
+delivers push notifications, and generates tailored resumes and cover letters
+using the Claude API.
 
 ```
-Scheduler (hourly) → SerpAPI Google Jobs → SQLite
+Scheduler (hourly) → SerpAPI Google Jobs → PostgreSQL
                                               ↓ new jobs
-                                         ntfy.sh → Phone notification
+                                         ntfy.sh → Phone notification (per-user topic)
                                               ↓ user opens link
                                          Web Dashboard (approve/reject)
                                               ↓ approved
-                                    Claude API → Resume + Cover Letter HTML
+                                    Claude API → Resume + Cover Letter (HTML + Markdown)
                                               ↓
-                                    go-rod (headless Chromium) → PDF files
+                                    go-rod (headless Chromium) → PDF (optional)
                                               ↓
-                                    Web Dashboard (view + download)
+                                    Web Dashboard (view + download MD / DOCX / PDF)
 ```
+
+Users sign in via Google or GitHub OAuth. Each user has their own job feed,
+search filters, resume, and notification topic — all configured in the Settings page.
 
 ## Prerequisites
 
-| Requirement | Version |
-|-------------|---------|
-| Go | 1.22+ |
-| Chromium / Chrome | any recent version |
-| SerpAPI account | https://serpapi.com |
-| Anthropic API key | https://console.anthropic.com |
-| ntfy.sh account (optional) | https://ntfy.sh |
+| Requirement | Notes |
+|-------------|-------|
+| Go 1.25+ | [go.dev/dl](https://go.dev/dl) |
+| Docker + Docker Compose | For the database and dev stack |
+| GitHub OAuth App | Required for login — [create one](https://github.com/settings/developers) |
+| Google OAuth App | Optional second login provider — [Google Cloud Console](https://console.cloud.google.com) |
+| SerpAPI account | Optional — needed for job scraping ([serpapi.com](https://serpapi.com)) |
+| Anthropic API key | Optional — needed for resume generation ([console.anthropic.com](https://console.anthropic.com)) |
+| Chromium / Chrome | Optional — needed for PDF generation; skipped gracefully if absent |
 
 Chromium must be on `$PATH` as `chromium`, `chromium-browser`, or `google-chrome`.
-go-rod will attempt to download it automatically if none is found.
+go-rod will attempt to download it automatically if none is found. PDF generation
+is non-fatal — the app runs normally without it.
 
-## Installation
+## Local Development
+
+### Quick start (Docker + hot-reload)
 
 ```bash
 git clone https://github.com/whinchman/jobhuntr
 cd jobhuntr
-go build -o bin/jobhuntr ./cmd/jobhuntr
+
+cp .env.example .env          # fill in at minimum SESSION_SECRET and GITHUB_CLIENT_ID/SECRET
+cp config.yaml.example config.yaml
+
+make dev                      # starts postgres + app with air hot-reload
 ```
+
+The app will be available at `http://localhost:8080`. Source changes in `cmd/`
+or `internal/` trigger an automatic rebuild via [air](https://github.com/air-verse/air).
+
+`DATABASE_URL` is set automatically by Compose — do not override it in `.env`
+unless running natively.
+
+### Native (without Docker app container)
+
+```bash
+make db-up          # start only the postgres container
+# set DATABASE_URL in .env (uncomment the postgres line)
+make dev-native     # run app with air hot-reload (requires air: go install github.com/air-verse/air@latest)
+```
+
+### Make targets
+
+| Target | Description |
+|--------|-------------|
+| `make dev` | Docker dev stack with hot-reload |
+| `make dev-down` | Stop the dev stack |
+| `make db-up` | Start only the database |
+| `make dev-native` | Hot-reload natively (requires `air` on PATH) |
+| `make build` | Build binary to `bin/jobhuntr` |
+| `make run` | Build and run via `run.sh` |
+| `make test` | `go test ./...` |
+| `make test-race` | `go test -race ./...` |
+| `make clean` | Remove `bin/`, `tmp/`, generated output files |
 
 ## Configuration
 
-Copy `config.yaml` and fill in your values:
+Copy `config.yaml.example` to `config.yaml` and fill in the values, or provide
+everything via environment variables. `config.Load()` sources `.env` automatically.
 
-```yaml
-server:
-  port: 8080
-  base_url: "http://localhost:8080"   # used in ntfy notification links
+### Environment variables
 
-scraper:
-  interval: "1h"
-  serpapi_key: "${SERPAPI_KEY}"        # from environment
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SESSION_SECRET` | Yes | 32+ byte random key — `openssl rand -hex 32` |
+| `GITHUB_CLIENT_ID` | Yes | GitHub OAuth App client ID |
+| `GITHUB_CLIENT_SECRET` | Yes | GitHub OAuth App client secret |
+| `DATABASE_URL` | Yes (native only) | PostgreSQL DSN — set automatically by Compose |
+| `GOOGLE_CLIENT_ID` | No | Google OAuth App client ID |
+| `GOOGLE_CLIENT_SECRET` | No | Google OAuth App client secret |
+| `SERPAPI_KEY` | No | Enables job scraping |
+| `ANTHROPIC_API_KEY` | No | Enables resume/cover letter generation |
 
-search_filters:
-  - keywords: "senior software engineer golang"
-    location: "Remote"
-    min_salary: 150000
+### OAuth setup
 
-ntfy:
-  topic: "${NTFY_TOPIC}"
-  server: "https://ntfy.sh"
+**GitHub** (required):
+1. Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App.
+2. Set *Homepage URL* to your app's base URL (e.g. `http://localhost:8080`).
+3. Set *Authorization callback URL* to `<base_url>/auth/github/callback`.
+4. Copy the client ID and secret into `.env`.
 
-claude:
-  api_key: "${ANTHROPIC_API_KEY}"
-  model: "claude-sonnet-4-20250514"
+**Google** (optional):
+1. Open [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Credentials.
+2. Create an OAuth 2.0 Client ID (Web application).
+3. Add `<base_url>/auth/google/callback` to *Authorised redirect URIs*.
+4. Copy the client ID and secret into `.env`.
 
-resume:
-  path: "./resume.md"    # your base resume in Markdown
+### Per-user settings
 
-output:
-  dir: "./output"        # generated PDFs are written here
-```
+The following are configured per-user in the **Settings** page after sign-in —
+they are not global environment variables:
 
-Set the required environment variables (or export them before running):
-
-```bash
-cp .env.example .env
-# edit .env with your keys
-export $(grep -v '^#' .env | xargs)
-```
-
-Create your base resume in Markdown at `resume.md`. JobHuntr passes this to
-Claude, which tailors it for each approved job.
-
-## Running
-
-```bash
-./bin/jobhuntr -config config.yaml -db jobhuntr.db
-```
-
-Flags:
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-config` | `config.yaml` | Path to config file |
-| `-db` | `jobhuntr.db` | Path to SQLite database |
-
-The web dashboard is available at `http://localhost:8080` (or the configured port).
+- **Search filters** — keywords, location, salary range
+- **ntfy topic** — your personal ntfy.sh topic for job notifications
+- **Resume** — your base resume in Markdown; Claude tailors it per job
 
 ## Usage Workflow
 
-1. JobHuntr scrapes Google Jobs via SerpAPI on the configured interval.
-2. Each new job triggers a push notification to your phone via ntfy.sh.
-3. Open the dashboard from the notification link.
-4. **Approve** jobs you are interested in; **Reject** ones you are not.
-5. Approved jobs are picked up by the background worker, which calls Claude
-   to generate a tailored resume and cover letter as HTML.
-6. go-rod converts the HTML to PDF files and saves them under `output/{job_id}/`.
-7. The job detail page shows a preview and download links for both PDFs.
+1. Sign in via GitHub or Google OAuth.
+2. Add search filters in Settings.
+3. JobHuntr scrapes Google Jobs via SerpAPI on the configured interval (default 1 hour).
+4. Each new job triggers a push notification to your ntfy topic.
+5. Open the dashboard from the notification link.
+6. **Approve** jobs you are interested in; **Reject** ones you are not.
+7. Approved jobs are queued for the background worker, which calls Claude to
+   generate a tailored resume and cover letter in HTML and Markdown.
+8. Optionally, Chromium converts the HTML to PDF.
+9. The job detail page shows a preview and download links for Markdown, DOCX, and PDF formats.
 
 ## ntfy Setup
 
 1. Install the [ntfy app](https://ntfy.sh/#download) on your phone.
-2. Subscribe to your topic (e.g. `jobhuntr-yourname`).
-3. Set `NTFY_TOPIC=jobhuntr-yourname` in your environment.
+2. Subscribe to a private topic (e.g. `jobhuntr-yourname-abc123`).
+3. Enter the topic name in Settings → Notifications after signing in.
 
-Keep your topic name private — anyone who knows it can post notifications to
-your device.
+Keep your topic name private — anyone who knows it can post notifications to your device.
 
-## Running with Docker
-
-The easiest way to run JobHuntr locally is with Docker Compose, which starts
-the app and a Postgres database together.
-
-**1. Set up your environment file:**
+## Running with Docker (production-like)
 
 ```bash
-cp .env.example .env
-# Edit .env and fill in ANTHROPIC_API_KEY, SERPAPI_KEY, NTFY_TOPIC, SESSION_SECRET, etc.
-```
-
-**2. Create a `config.yaml` from the example:**
-
-```bash
+cp .env.example .env          # fill in all required secrets
 cp config.yaml.example config.yaml
+
+docker compose up --build     # starts app + postgres
 ```
-
-**3. Start the stack:**
-
-```bash
-docker compose up --build
-```
-
-The app will be available at `http://localhost:8080`. Generated PDFs are
-written to `./output/` on the host. The `DATABASE_URL` is set automatically
-by Compose to point at the `db` service — do not override it in `.env`.
 
 To run in the background:
 
@@ -153,98 +157,50 @@ docker compose up --build -d
 docker compose logs -f app
 ```
 
-## Running with systemd
-
-```bash
-# Build and install
-go build -o /usr/local/bin/jobhuntr ./cmd/jobhuntr
-
-# Create system user and directories
-useradd --system --no-create-home jobhuntr
-mkdir -p /etc/jobhuntr /var/lib/jobhuntr /opt/jobhuntr/output
-chown jobhuntr:jobhuntr /var/lib/jobhuntr /opt/jobhuntr/output
-
-# Install config and env file
-cp config.yaml /etc/jobhuntr/config.yaml
-cp .env.example /etc/jobhuntr/jobhuntr.env
-# edit /etc/jobhuntr/jobhuntr.env with your keys
-
-# Install and start the service
-cp deploy/jobhuntr.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now jobhuntr
-```
-
-View logs:
-
-```bash
-journalctl -u jobhuntr -f
-```
-
-## Health Check
-
-```
-GET /health
-```
-
-Returns:
-
-```json
-{
-  "status": "ok",
-  "uptime": "2h15m30s",
-  "last_scrape": "2026-01-01T10:00:00Z"
-}
-```
-
-`last_scrape` is omitted if no scrape has completed yet.
-
-A minimal liveness probe is also available at `GET /healthz` — returns
-`{"status":"ok"}` with no auth and no database access. This is the path
-used by Render's health check configuration.
-
 ## Deploy to Render
 
-JobHuntr ships with a `render.yaml` file that defines a web service (Docker)
-and a managed Postgres database. Render reads this file automatically when
-you connect the repository.
+JobHuntr ships with a `render.yaml` Blueprint that provisions a web service
+(Docker) and a managed Postgres database.
 
 ### One-time setup
 
-1. **Create a Render account** at [render.com](https://render.com) if you
-   do not already have one.
+1. **Create a Render account** at [render.com](https://render.com).
 
-2. **Connect your repository:** In the Render dashboard click
-   *New → Blueprint*, select this repo, and Render will detect `render.yaml`
-   and create the `jobhuntr` web service and `jobhuntr-db` Postgres instance.
+2. **Connect the repository:** Dashboard → *New → Blueprint*, select this repo.
+   Render detects `render.yaml` and creates the `jobhuntr` web service and
+   `jobhuntr-db` Postgres instance automatically.
 
-3. **Set environment variables:** Open the `jobhuntr` web service in the
-   dashboard, go to *Environment*, and add the following secrets (these are
-   marked `sync: false` in `render.yaml` so Render never stores them in the
-   repo):
+3. **Set environment variables:** Open the `jobhuntr` service → *Environment*
+   and add these secrets (marked `sync: false` so Render never stores them in
+   the repo):
 
    | Variable | Where to get it |
    |----------|----------------|
+   | `SESSION_SECRET` | `openssl rand -hex 32` |
+   | `GITHUB_CLIENT_ID` | GitHub → Settings → Developer settings → OAuth Apps |
+   | `GITHUB_CLIENT_SECRET` | (same) |
+   | `GOOGLE_CLIENT_ID` | Google Cloud Console → APIs & Services → Credentials |
+   | `GOOGLE_CLIENT_SECRET` | (same) |
    | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
    | `SERPAPI_KEY` | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
-   | `NTFY_TOPIC` | Any private string; subscribe in the ntfy app |
-   | `SESSION_SECRET` | Run `openssl rand -hex 32` locally |
-   | `GOOGLE_CLIENT_ID` | Google Cloud Console → APIs & Services → Credentials |
-   | `GOOGLE_CLIENT_SECRET` | (same as above) |
-   | `GITHUB_CLIENT_ID` | GitHub → Settings → Developer settings → OAuth Apps |
-   | `GITHUB_CLIENT_SECRET` | (same as above) |
 
-4. **Set `base_url`:** Update `base_url` in `config.yaml` (or override it
-   via an environment variable) to your Render web service URL, e.g.
-   `https://jobhuntr.onrender.com`. This is required so that OAuth redirect
-   URIs resolve correctly after login. You must also register this URL as an
-   authorised redirect URI in your Google and GitHub OAuth app settings.
+4. **Set `base_url`:** Update `base_url` in `config.yaml` to your Render URL
+   (e.g. `https://jobhuntr.onrender.com`). Register this URL as an authorised
+   redirect URI in both your GitHub and Google OAuth app settings.
 
-5. **Deploy:** Render triggers a build automatically on every push to the
-   connected branch. The first deploy builds the Docker image, runs the
-   Postgres migration, and starts the service.
+5. **Deploy:** Render builds automatically on every push to the connected branch.
+   The first deploy runs Postgres migrations and starts the service.
 
 ### Render.yaml reference
 
-See [render.com/docs/blueprint-spec](https://render.com/docs/blueprint-spec)
-for full documentation on the `render.yaml` Blueprint format.
+See [render.com/docs/blueprint-spec](https://render.com/docs/blueprint-spec).
+
+## Health Checks
+
+`GET /healthz` — liveness probe, no auth, no database access:
+
+```json
+{"status": "ok"}
+```
+
+Used by Render's health check configuration.
