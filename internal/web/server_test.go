@@ -100,14 +100,16 @@ type mockFilterStore struct {
 	resumes     map[int64]string
 	ntfyTopics  map[int64]string
 	nextID      int64
+	bannedTerms map[int64][]models.UserBannedTerm
 }
 
 func newMockFilterStore() *mockFilterStore {
 	return &mockFilterStore{
-		filters:    make(map[int64][]models.UserSearchFilter),
-		resumes:    make(map[int64]string),
-		ntfyTopics: make(map[int64]string),
-		nextID:     1,
+		filters:     make(map[int64][]models.UserSearchFilter),
+		resumes:     make(map[int64]string),
+		ntfyTopics:  make(map[int64]string),
+		nextID:      1,
+		bannedTerms: make(map[int64][]models.UserBannedTerm),
 	}
 }
 
@@ -152,6 +154,43 @@ func (m *mockFilterStore) UpdateUserNtfyTopic(_ context.Context, userID int64, t
 	defer m.mu.Unlock()
 	m.ntfyTopics[userID] = topic
 	return nil
+}
+
+func (m *mockFilterStore) ListUserBannedTerms(_ context.Context, userID int64) ([]models.UserBannedTerm, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bannedTerms[userID], nil
+}
+
+func (m *mockFilterStore) CreateUserBannedTerm(_ context.Context, userID int64, term string) (*models.UserBannedTerm, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.bannedTerms[userID] {
+		if t.Term == term {
+			return nil, fmt.Errorf("store: banned term already exists for user")
+		}
+	}
+	bt := models.UserBannedTerm{
+		ID:     m.nextID,
+		UserID: userID,
+		Term:   term,
+	}
+	m.nextID++
+	m.bannedTerms[userID] = append(m.bannedTerms[userID], bt)
+	return &bt, nil
+}
+
+func (m *mockFilterStore) DeleteUserBannedTerm(_ context.Context, userID int64, termID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	terms := m.bannedTerms[userID]
+	for i, t := range terms {
+		if t.ID == termID {
+			m.bannedTerms[userID] = append(terms[:i], terms[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("store: banned term %d not found for user %d", termID, userID)
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -1435,4 +1474,165 @@ func TestHandleSetApplicationStatus_NonApprovedJob(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Errorf("status = %d, want 403; body: %s", resp.StatusCode, body)
 	}
+}
+
+// ─── banned terms handler tests ───────────────────────────────────────────────
+
+func TestHandleAddBannedTerm(t *testing.T) {
+	t.Run("POST /settings/banned-terms with valid term adds it and redirects", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"term": {"Staffing Agency"}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Should redirect (3xx) to /settings?saved=1
+		if resp.StatusCode/100 != 3 && resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 3xx redirect", resp.StatusCode)
+		}
+
+		fs.mu.Lock()
+		terms := fs.bannedTerms[0]
+		fs.mu.Unlock()
+		if len(terms) != 1 {
+			t.Fatalf("expected 1 banned term, got %d", len(terms))
+		}
+		if terms[0].Term != "Staffing Agency" {
+			t.Errorf("term = %q, want %q", terms[0].Term, "Staffing Agency")
+		}
+	})
+
+	t.Run("POST /settings/banned-terms with blank term returns 400", func(t *testing.T) {
+		ts, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"term": {""}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+
+	t.Run("POST /settings/banned-terms with whitespace-only term returns 400", func(t *testing.T) {
+		ts, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"term": {"   "}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+
+	t.Run("POST /settings/banned-terms with duplicate term redirects silently", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
+		defer ts.Close()
+
+		// Seed a term.
+		fs.CreateUserBannedTerm(context.Background(), 0, "Duplicate Term")
+
+		form := url.Values{"term": {"Duplicate Term"}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Duplicate should redirect silently (not error).
+		if resp.StatusCode/100 != 3 && resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 3xx redirect for duplicate", resp.StatusCode)
+		}
+
+		// Verify only one copy exists.
+		fs.mu.Lock()
+		count := len(fs.bannedTerms[0])
+		fs.mu.Unlock()
+		if count != 1 {
+			t.Errorf("expected 1 banned term after duplicate add, got %d", count)
+		}
+	})
+}
+
+func TestHandleRemoveBannedTerm(t *testing.T) {
+	t.Run("POST /settings/banned-terms/remove removes the term and redirects", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
+		defer ts.Close()
+
+		bt, _ := fs.CreateUserBannedTerm(context.Background(), 0, "ToRemove")
+
+		resp, err := ts.Client().Post(
+			fmt.Sprintf("%s/settings/banned-terms/remove?id=%d", ts.URL, bt.ID),
+			"application/x-www-form-urlencoded", nil,
+		)
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms/remove: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode/100 != 3 && resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 3xx redirect", resp.StatusCode)
+		}
+
+		fs.mu.Lock()
+		remaining := fs.bannedTerms[0]
+		fs.mu.Unlock()
+		if len(remaining) != 0 {
+			t.Errorf("expected 0 banned terms after remove, got %d", len(remaining))
+		}
+	})
+
+	t.Run("POST /settings/banned-terms/remove with invalid id returns 400", func(t *testing.T) {
+		ts, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms/remove?id=notanid", "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms/remove: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+}
+
+func TestSettingsPage_ShowsBannedTerms(t *testing.T) {
+	t.Run("settings page renders banned terms section", func(t *testing.T) {
+		ms := newMockJobStore()
+		fs := newMockFilterStore()
+		fs.CreateUserBannedTerm(context.Background(), 0, "ContractRole")
+
+		srv := web.NewServerWithConfig(ms, nil, fs, nil)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/settings")
+		if err != nil {
+			t.Fatalf("GET /settings: %v", err)
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), "ContractRole") {
+			t.Errorf("settings page does not contain banned term 'ContractRole'")
+		}
+		if !strings.Contains(string(body), "Banned Keywords") {
+			t.Errorf("settings page does not contain 'Banned Keywords' section heading")
+		}
+	})
 }
