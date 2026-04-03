@@ -40,6 +40,8 @@ services:
     volumes:
       - .:/workspace
       - go-mod-cache:/root/go/pkg/mod
+    environment:
+      PORT: "8080"
     ports:
       - "8080:8080"
     depends_on:

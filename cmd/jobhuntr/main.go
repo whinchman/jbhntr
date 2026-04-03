@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -43,8 +44,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("jobhuntr starting on :%d\n", cfg.Server.Port)
-	slog.Info("jobhuntr starting", "port", cfg.Server.Port, "base_url", cfg.Server.BaseURL)
+	port := cfg.Server.Port
+	if p := os.Getenv("PORT"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil {
+			port = n
+		}
+	}
+
+	fmt.Printf("jobhuntr starting on :%d\n", port)
+	slog.Info("jobhuntr starting", "port", port, "base_url", cfg.Server.BaseURL)
 
 	db, err := store.Open(dsn)
 	if err != nil {
@@ -92,7 +100,7 @@ func main() {
 	webSrv := web.NewServerWithConfig(db, db, db, cfg).
 		WithLastScrapeFn(sched.LastScrapeAt)
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:    fmt.Sprintf(":%d", port),
 		Handler: webSrv.Handler(),
 	}
 	go func() {
