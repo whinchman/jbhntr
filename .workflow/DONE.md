@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## Analytics — Stats Dashboard
+
+**Completed:** 2026-04-03
+
+Dedicated `/stats` route (requireAuth). Single conditional-aggregation SQL query returns 7 per-user counters: Total Found, Approved, Rejected, Applied, Interviewing, Won, Lost. 12-week job discovery bar chart (pure CSS, no chart library). `StatsStore` interface; `WithStatsStore` wired in `main.go`. Depends on migration 011 `application_status` column. BUG-032 (nil guard on statsStore) logged non-blocking.
+
+Tasks: analytics-1-store, analytics-2-handlers, analytics-3-code-review, analytics-4-qa (all done, merged to development)
+
+---
+
 ## Banned Keywords / Companies Filter
 
 **Completed:** 2026-04-03
