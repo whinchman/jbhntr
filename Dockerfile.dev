@@ -1,0 +1,12 @@
+FROM golang:1.25-bookworm
+
+# Install Chromium for go-rod PDF (same as production)
+RUN apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/*
+
+# Install air for hot-reload
+RUN go install github.com/air-verse/air@latest
+
+WORKDIR /workspace
+
+# Default: run air (mounts source at /workspace at runtime)
+CMD ["air"]

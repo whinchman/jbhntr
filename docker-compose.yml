@@ -28,5 +28,24 @@ services:
       db:
         condition: service_healthy
 
+  dev:
+    profiles: [dev]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://jobhuntr:secret@db:5432/jobhuntr?sslmode=disable
+    volumes:
+      - .:/workspace
+      - go-mod-cache:/root/go/pkg/mod
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    working_dir: /workspace
+
 volumes:
   pgdata:
+  go-mod-cache:
