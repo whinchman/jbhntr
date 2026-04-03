@@ -8,6 +8,28 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-022: [admin-panel] migrate_test.go missing migration 010 in expected list
+
+- File: `internal/store/migrate_test.go`, lines 42–52
+- Severity: warning (test failure when TEST_DATABASE_URL is set)
+- Branch: feature/admin-panel-3-admin-package
+- Description: `TestMigrate/applies_all_migrations` has an `expected` slice that ends at `009_add_email_auth.sql`. Migration `010_add_banned_at_to_users.sql` was added by the admin-panel feature but the test list was not updated. Running `go test ./internal/store/... -run TestMigrate` against a live PostgreSQL DB (with `TEST_DATABASE_URL` set) will fail with `migrations applied = 10, want 9`.
+- Reproduction: Set `TEST_DATABASE_URL` to a live Postgres DSN and run `go test ./internal/store/... -run TestMigrate/applies_all_migrations`.
+- Fix: Add `"010_add_banned_at_to_users.sql"` to the `expected` slice in `migrate_test.go` after `"009_add_email_auth.sql"`.
+
+---
+
+## BUG-023: [admin-panel] ListAllUsers and ListAllFilters have no row limit
+
+- File: `internal/store/user.go`, `ListAllUsers` (line ~462) and `ListAllFilters` (line ~515)
+- Severity: warning (scalability — not a correctness defect)
+- Branch: feature/admin-panel-3-admin-package
+- Description: Both `ListAllUsers` and `ListAllFilters` execute `SELECT ... ORDER BY ... DESC` with no `LIMIT` clause. The entire users or filters table is loaded into memory on each admin page view. This is acceptable at current scale but will cause memory pressure and slow page loads as the dataset grows. The admin panel has no pagination UI either.
+- Reproduction: Populate the DB with a large number of users/filters and observe memory usage during `GET /admin/users`.
+- Fix: Add a default `LIMIT` (e.g. 1000) to both queries, or add optional limit/offset parameters to the `AdminStore` interface and paginate the admin UI.
+
+---
+
 ## BUG-020: [email-auth] TestRequireAuth_Unauthenticated and TestRequireAuth_DeletedUser test wrong route
 
 - File: `internal/web/auth_test.go`, lines 210–235 and 617–649
