@@ -11,5 +11,4 @@ items into tasks, then moves them to TODO.md.
 
 ## Features
 
-- [ ] Email/password authentication — disable OAuth login and replace with standard email+password auth. Includes: registration, login, logout, forgot password (email reset link), password reset, email verification. Needs an email sending capability (SMTP or transactional email service). Design the full flow including all UI screens.
 
