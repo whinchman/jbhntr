@@ -6,7 +6,6 @@ output/
 *.db-shm
 .env
 worktrees/
-config.yaml
 worktrees/*
 !worktrees/.gitkeep
 tasks/*.log
