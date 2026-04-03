@@ -8,6 +8,28 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-031: [banned-keywords] handleAddBannedTerm uses fragile string check instead of errors.Is for duplicate detection
+
+- **File**: `internal/web/server.go`, `handleAddBannedTerm` (~line 1197)
+- **Severity**: warning
+- **Branch**: feature/banned-keywords-4-web
+- **Description**: The duplicate-term check uses `strings.Contains(err.Error(), "already exists")` instead of `errors.Is(err, store.ErrDuplicateBannedTerm)`. `store.ErrDuplicateBannedTerm` is returned unwrapped and the `store` package is already imported, so `errors.Is` would work correctly. The string match will silently swallow any error whose message contains "already exists" (could include unrelated DB errors), masking real failures as silent redirects.
+- **Reproduction**: Trigger any DB error from `CreateUserBannedTerm` whose message contains "already exists" (e.g. a custom error from a middleware layer). The handler will redirect as if it were a duplicate instead of returning 500.
+- **Fix**: Replace `strings.Contains(err.Error(), "already exists")` with `errors.Is(err, store.ErrDuplicateBannedTerm)`.
+
+---
+
+## BUG-030: [banned-keywords] handleDashboard silently discards ListUserBannedTerms error with no log
+
+- **File**: `internal/web/server.go`, `handleDashboard` (~line 503)
+- **Severity**: warning
+- **Branch**: feature/banned-keywords-4-web
+- **Description**: `bannedTerms, _ := s.filterStore.ListUserBannedTerms(...)` discards the error entirely with no log line. If the database call fails, the dashboard silently shows all jobs with banned-term filtering disabled and the operator has no visibility into the failure. The scheduler handles the equivalent error non-fatally but at least logs it.
+- **Reproduction**: Inject a DB error on `ListUserBannedTerms`. The dashboard returns 200 with full job list and no log output.
+- **Fix**: Capture the error and log it at `slog.Warn` level before continuing. Failing fast (500) is also acceptable but the current silent-continue behaviour is fine if a warning is logged.
+
+---
+
 ## BUG-029: [job-pipeline] branch 4 rejected_jobs.html references /partials/rejected-job-table which is never registered
 
 - File: `internal/web/templates/rejected_jobs.html` (branch 4), search `<input>` and column `<th>` elements
