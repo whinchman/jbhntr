@@ -266,7 +266,7 @@ func TestUpdateJobGenerated(t *testing.T) {
 		job := sampleJob("gen-test", "serpapi")
 		s.CreateJob(ctx, 0, job)
 
-		err := s.UpdateJobGenerated(ctx, 0, job.ID, "<h1>Resume</h1>", "<h1>Cover</h1>", "/out/resume.pdf", "/out/cover.pdf")
+		err := s.UpdateJobGenerated(ctx, 0, job.ID, "<h1>Resume</h1>", "<h1>Cover</h1>", "# Resume MD", "# Cover MD", "/out/resume.pdf", "/out/cover.pdf")
 		if err != nil {
 			t.Fatalf("UpdateJobGenerated error = %v", err)
 		}
@@ -274,6 +274,12 @@ func TestUpdateJobGenerated(t *testing.T) {
 		got, _ := s.GetJob(ctx, 0, job.ID)
 		if got.ResumeHTML != "<h1>Resume</h1>" {
 			t.Errorf("ResumeHTML = %q", got.ResumeHTML)
+		}
+		if got.ResumeMarkdown != "# Resume MD" {
+			t.Errorf("ResumeMarkdown = %q", got.ResumeMarkdown)
+		}
+		if got.CoverMarkdown != "# Cover MD" {
+			t.Errorf("CoverMarkdown = %q", got.CoverMarkdown)
 		}
 		if got.ResumePDF != "/out/resume.pdf" {
 			t.Errorf("ResumePDF = %q", got.ResumePDF)

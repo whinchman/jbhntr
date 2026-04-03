@@ -156,7 +156,7 @@ func (s *Store) CreateJob(ctx context.Context, userID int64, job *models.Job) (b
 // the job must belong to that user.
 func (s *Store) GetJob(ctx context.Context, userID int64, id int64) (*models.Job, error) {
 	q := `SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url,
-	             status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg,
+	             status, summary, extracted_salary, resume_html, cover_html, resume_markdown, cover_markdown, resume_pdf, cover_pdf, error_msg,
 	             discovered_at, updated_at
 	      FROM jobs WHERE id = $1`
 	args := []any{id}
@@ -202,7 +202,7 @@ func (s *Store) ListJobs(ctx context.Context, userID int64, f ListJobsFilter) ([
 		argN += 3
 	}
 
-	q := "SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url, status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg, discovered_at, updated_at FROM jobs"
+	q := "SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url, status, summary, extracted_salary, resume_html, cover_html, resume_markdown, cover_markdown, resume_pdf, cover_pdf, error_msg, discovered_at, updated_at FROM jobs"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -314,17 +314,17 @@ func (s *Store) UpdateJobError(ctx context.Context, userID int64, id int64, errM
 	return nil
 }
 
-// UpdateJobGenerated sets the generated HTML and PDF paths on a job.
+// UpdateJobGenerated sets the generated HTML, Markdown, and PDF paths on a job.
 // When userID is 0 the update is not scoped by user (worker path).
-func (s *Store) UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
+func (s *Store) UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF string) error {
 	var q string
 	var args []any
 	if userID != 0 {
-		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_pdf=$3, cover_pdf=$4, updated_at=$5 WHERE id=$6 AND user_id=$7"
-		args = []any{resumeHTML, coverHTML, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id, userID}
+		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_markdown=$3, cover_markdown=$4, resume_pdf=$5, cover_pdf=$6, updated_at=$7 WHERE id=$8 AND user_id=$9"
+		args = []any{resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id, userID}
 	} else {
-		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_pdf=$3, cover_pdf=$4, updated_at=$5 WHERE id=$6"
-		args = []any{resumeHTML, coverHTML, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id}
+		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_markdown=$3, cover_markdown=$4, resume_pdf=$5, cover_pdf=$6, updated_at=$7 WHERE id=$8"
+		args = []any{resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id}
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
@@ -366,7 +366,7 @@ func scanJob(s scanner) (*models.Job, error) {
 		&job.Title, &job.Company, &job.Location,
 		&job.Description, &job.Salary, &job.ApplyURL,
 		&status, &job.Summary, &job.ExtractedSalary,
-		&job.ResumeHTML, &job.CoverHTML, &job.ResumePDF, &job.CoverPDF,
+		&job.ResumeHTML, &job.CoverHTML, &job.ResumeMarkdown, &job.CoverMarkdown, &job.ResumePDF, &job.CoverPDF,
 		&job.ErrorMsg,
 		&discoveredAt, &updatedAt,
 	)
