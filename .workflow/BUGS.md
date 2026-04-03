@@ -8,6 +8,64 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-014: migrate_test.go hardcodes 7 migrations but migration 008 now exists
+
+**Severity:** Warning (test failure — will break `go test ./internal/store/...` on a live DB)
+**File:** `internal/store/migrate_test.go`, lines 41–58
+**Found by:** QA agent (resume-export QA pass)
+**Branch:** feature/resume-export-3-routes
+
+### Description
+
+`TestMigrate/applies_all_migrations` builds an expected list of 7 migration file names (001–007) and asserts `len(names) == len(expected)`. Migration `008_add_markdown_columns.sql` was added by the foundation task (feature/resume-export-1-foundation) but `migrate_test.go` was NOT updated to include it. When this test runs against a live PostgreSQL database (`TEST_DATABASE_URL` set), it will fail with:
+```
+migrations applied = 8, want 7
+```
+
+### Fix
+
+Add `"008_add_markdown_columns.sql"` to the `expected` slice in `TestMigrate` (line 58 becomes line 59):
+
+```go
+expected := []string{
+    "001_create_users.sql",
+    "002_create_user_search_filters.sql",
+    "003_add_user_id_to_jobs.sql",
+    "004_rebuild_jobs_unique_constraint.sql",
+    "005_add_onboarding_complete.sql",
+    "006_rebuild_jobs_drop_legacy_unique.sql",
+    "007_add_ntfy_topic_to_users.sql",
+    "008_add_markdown_columns.sql",
+}
+```
+
+---
+
+## BUG-015: job_detail.html inline style= regressions — CSS classes replaced with inline styles
+
+**Severity:** Warning (code style regression; inline styles bypass the design system)
+**File:** `internal/web/templates/job_detail.html`, lines 25–26, 29–30, 36, 42, 56
+**Found by:** QA agent (resume-export QA pass)
+**Branch:** feature/resume-export-3-routes
+
+### Description
+
+The coder replaced CSS classes with inline `style=` attributes in job_detail.html as part of the resume-export-3-routes implementation. Specifically:
+
+1. **Lines 25–26, 29–30**: Approve and Reject buttons changed from `class="outline contrast btn-sm"` / `class="outline btn-sm"` to `class="outline contrast" style="padding:0.3em 0.8em;"` / `class="outline" style="padding:0.3em 0.8em;"`. The `btn-sm` utility class was removed and replaced with a hardcoded inline style.
+
+2. **Line 36**: The job description `<pre>` changed from `class="job-description"` to `style="white-space:pre-wrap;font-size:0.9em;background:#f9f9f9;padding:1rem;border-radius:0.3em;"`. 
+
+3. **Lines 42, 56**: The content preview `<div>` changed from `class="document-preview"` to `style="border:1px solid #ccc;border-radius:0.3em;padding:1rem;margin-bottom:0.5rem;overflow:auto;"`.
+
+These changes inline visual styling into the template, making it harder to restyle globally and inconsistent with the rest of the codebase which uses `app.css` classes.
+
+### Fix
+
+Revert inline styles in job_detail.html to class-based styling. The CSS classes `btn-sm`, `job-description`, and `document-preview` may need to be added/restored in `app.css` if they were removed. Alternatively, add the styles as utility classes to `app.css`.
+
+---
+
 ## BUG-013: Test panic — body[:4] accessed when len(body) < 4 in DOCX download tests
 
 **Severity:** Warning
