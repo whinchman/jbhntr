@@ -36,6 +36,31 @@
        hx-include="[name='q']"
        value="{{.Search}}">
 
+{{if .NextScrapeAt.IsZero}}
+<p class="scrape-countdown">Scrape running soon…</p>
+{{else}}
+<p class="scrape-countdown" data-next-scrape="{{.NextScrapeAt.UTC.Format "2006-01-02T15:04:05Z"}}">
+  Next scrape in <span id="scrape-timer">…</span>
+</p>
+<script>
+(function() {
+  var el = document.querySelector('[data-next-scrape]');
+  if (!el) return;
+  var target = new Date(el.getAttribute('data-next-scrape'));
+  var span = document.getElementById('scrape-timer');
+  function tick() {
+    var diff = Math.max(0, Math.round((target - Date.now()) / 1000));
+    if (diff === 0) { span.textContent = 'any moment now'; return; }
+    var m = Math.floor(diff / 60);
+    var s = diff % 60;
+    span.textContent = (m > 0 ? m + 'm ' : '') + s + 's';
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
+{{end}}
+
 <div hx-get="/partials/job-table"
      hx-vals="js:{status: new URLSearchParams(location.search).get('status') || '', q: new URLSearchParams(location.search).get('q') || '', sort: new URLSearchParams(location.search).get('sort') || '', order: new URLSearchParams(location.search).get('order') || ''}"
      hx-trigger="every 30s"

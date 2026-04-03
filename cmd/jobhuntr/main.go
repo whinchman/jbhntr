@@ -109,6 +109,7 @@ func main() {
 	// Start HTTP server.
 	webSrv := web.NewServerWithConfig(db, db, db, cfg).
 		WithLastScrapeFn(sched.LastScrapeAt).
+		WithScrapeInterval(interval).
 		WithMailer(m)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),

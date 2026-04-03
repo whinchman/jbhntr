@@ -57,6 +57,11 @@ func (s *Scheduler) LastScrapeAt() time.Time {
 	return s.lastScrapeAt
 }
 
+// Interval returns the configured scrape interval.
+func (s *Scheduler) Interval() time.Duration {
+	return s.interval
+}
+
 // NewScheduler constructs a Scheduler. If logger is nil, slog.Default() is used.
 func NewScheduler(source Source, st StoreWriter, uf UserFilterReader, interval time.Duration, logger *slog.Logger) *Scheduler {
 	if logger == nil {
