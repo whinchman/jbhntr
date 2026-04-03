@@ -119,8 +119,9 @@ type Server struct {
 	forgotPasswordTmpl *template.Template
 	resetPasswordTmpl *template.Template
 
-	startTime    time.Time
-	lastScrapeFn func() time.Time // optional; returns last scrape time
+	startTime      time.Time
+	lastScrapeFn   func() time.Time // optional; returns last scrape time
+	scrapeInterval time.Duration
 
 	cfg *config.Config
 }
@@ -225,6 +226,13 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 // time for the /health endpoint. Call this after NewServerWithConfig.
 func (s *Server) WithLastScrapeFn(fn func() time.Time) *Server {
 	s.lastScrapeFn = fn
+	return s
+}
+
+// WithScrapeInterval sets the scrape interval so the dashboard can display a
+// countdown to the next scheduled run.
+func (s *Server) WithScrapeInterval(d time.Duration) *Server {
+	s.scrapeInterval = d
 	return s
 }
 
@@ -397,6 +405,7 @@ type dashboardData struct {
 	Columns      []columnDef
 	CSRFToken    string
 	User         *models.User
+	NextScrapeAt time.Time
 }
 
 func parseSortParams(q url.Values) (string, string) {
@@ -433,6 +442,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if jobs == nil {
 		jobs = []models.Job{}
 	}
+	var nextScrape time.Time
+	if s.lastScrapeFn != nil && s.scrapeInterval > 0 {
+		if last := s.lastScrapeFn(); !last.IsZero() {
+			nextScrape = last.Add(s.scrapeInterval)
+		}
+	}
 	data := dashboardData{
 		Jobs:         jobs,
 		Statuses:     allStatuses,
@@ -443,6 +458,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Columns:      buildColumns(sort, order),
 		CSRFToken:    csrf.Token(r),
 		User:         user,
+		NextScrapeAt: nextScrape,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "layout.html", data); err != nil {
