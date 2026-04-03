@@ -25,6 +25,7 @@ import (
 	"github.com/whinchman/jobhuntr/internal/exporter"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/store"
+	"github.com/whinchman/jobhuntr/internal/web/admin"
 )
 
 // jobDetailData is the template data for the job detail page.
@@ -102,6 +103,7 @@ type Server struct {
 	store          JobStore
 	userStore      UserStore
 	filterStore    FilterStore
+	adminStore     admin.AdminStore
 	sessionStore   sessions.Store
 	oauthProviders map[string]*oauth2.Config
 	baseURL        string
@@ -243,6 +245,14 @@ func (s *Server) WithMailer(m EmailSender) *Server {
 	return s
 }
 
+// WithAdminStore sets the admin store used to power the /admin panel.
+// Call this after NewServerWithConfig. The admin panel is only mounted
+// when both this store and cfg.Admin.Password are non-empty.
+func (s *Server) WithAdminStore(as admin.AdminStore) *Server {
+	s.adminStore = as
+	return s
+}
+
 // WithTestOAuthProvider replaces an OAuth provider's configuration.
 // Intended for integration tests that need to point OAuth endpoints at a
 // mock server.
@@ -347,6 +357,13 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/{id}/reject", s.handleRejectJob)
 		})
 	})
+
+	// Admin panel — mounted at /admin, protected by HTTP Basic Auth.
+	// Only registered when both the admin store and admin password are configured.
+	if s.cfg != nil && s.adminStore != nil && s.cfg.Admin.Password != "" {
+		adminH := admin.New(s.adminStore, s.cfg.Admin.Password)
+		r.Mount("/admin", adminH.Routes())
+	}
 
 	return r
 }
