@@ -5,53 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>JobHuntr — Sign In</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-  <style>
-    body {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-    }
-    .login-card {
-      max-width: 420px;
-      width: 100%;
-      padding: 2rem;
-    }
-    .login-card header {
-      text-align: center;
-      margin-bottom: 1.5rem;
-    }
-    .login-card header h1 {
-      margin-bottom: 0.25rem;
-      font-size: 1.75rem;
-    }
-    .login-card header p {
-      margin-bottom: 0;
-      color: var(--pico-muted-color);
-    }
-    .provider-btn {
-      display: block;
-      width: 100%;
-      margin-bottom: 0.75rem;
-      text-align: center;
-    }
-    .flash-alert {
-      margin-bottom: 1.25rem;
-    }
-    .providers-section {
-      margin-top: 1rem;
-    }
-  </style>
+  <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
+<body class="login-page">
   <article class="login-card">
-    <header>
+    <header class="login-card-header">
       <h1>JobHuntr</h1>
       <p>Sign in to manage your job search</p>
     </header>
 
     {{if .Flash}}
-    <div role="alert" class="flash-alert">
+    <div role="alert" class="alert alert-info">
       <p>{{.Flash}}</p>
     </div>
     {{end}}
@@ -59,13 +23,13 @@
     <div class="providers-section">
       {{range .Providers}}
         {{if eq . "google"}}
-          <a href="/auth/google" role="button" class="provider-btn"
+          <a href="/auth/google" role="button" class="provider-btn provider-btn-google"
              onclick="this.setAttribute('aria-busy','true'); this.setAttribute('aria-label','Signing in with Google\u2026');">
             Sign in with Google
           </a>
         {{end}}
         {{if eq . "github"}}
-          <a href="/auth/github" role="button" class="provider-btn outline"
+          <a href="/auth/github" role="button" class="provider-btn provider-btn-github"
              onclick="this.setAttribute('aria-busy','true'); this.setAttribute('aria-label','Signing in with GitHub\u2026');">
             Sign in with GitHub
           </a>
