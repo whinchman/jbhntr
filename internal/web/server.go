@@ -362,7 +362,7 @@ func (s *Server) Handler() http.Handler {
 	// Only registered when both the admin store and admin password are configured.
 	if s.cfg != nil && s.adminStore != nil && s.cfg.Admin.Password != "" {
 		adminH := admin.New(s.adminStore, s.cfg.Admin.Password)
-		r.Mount("/admin", csrf.Exempt(adminH.Routes()))
+		r.Mount("/admin", adminH.Routes())
 	}
 
 	return r
