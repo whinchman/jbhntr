@@ -273,3 +273,34 @@ Placing `app.css` inside `templates/static/` is sufficient — the existing embe
 **Build note**: Go toolchain not available in this container — `go build ./...` could not be verified locally. The code follows the exact pattern specified in the Interface Contracts section. All acceptance criteria for CSS classes are met. Build verification must be performed on a machine with Go installed.
 
 **Tests**: No npm tests or Go tests applicable; `testing.command = "npm test"` but no package.json exists in this Go project.
+
+---
+
+**Code Review — 2026-04-03**
+
+**Verdict**: APPROVE
+
+**Findings**: 0 critical, 0 warning, 2 info
+
+### [INFO] app.css:395, 518–520 — `!important` usage in two places
+
+`.job-table-empty` uses `!important` on `padding` to override the `.job-table td` rule in the same file. `.btn-sm` uses `!important` on `padding`, `font-size`, and `border-radius` to override Pico CSS base button styles. Both are intentional and correct given the specificity constraints — no action required.
+
+### [INFO] app.css:682–692 — `.provider-btn-google` uses indigo accent colour, not Google brand colour
+
+The spec calls for indigo here, so this is by design. Not a bug.
+
+**Acceptance criteria check**:
+
+All 20+ CSS class groups verified present. Brace balance verified (108 open / 108 close). All required responsive breakpoints (≤639px, 640px, 900px, 768px) present.
+
+**server.go check**:
+
+- `"io/fs"` import added correctly at line 9 (alphabetically sorted in import block — correct).
+- `//go:embed templates` directive at line 37 is untouched.
+- Static route at line 214 matches the exact `Interface Contracts` pattern verbatim.
+- Route is registered outside all auth subrouters — static assets are correctly public.
+- CSRF middleware (`gorilla/csrf`) exempts GET/HEAD by default — no CSRF concern for `GET /static/app.css`.
+- `fs.Sub` panic on error is consistent with the pattern used by the rest of the server (template parse failures also use `template.Must` which panics — no inconsistency).
+
+**Build**: Go toolchain unavailable in container; must be verified on a dev machine. Code pattern is correct per spec and existing codebase conventions.
