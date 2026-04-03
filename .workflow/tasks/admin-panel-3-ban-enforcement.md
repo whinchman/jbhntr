@@ -1,7 +1,7 @@
 # Task: admin-panel-3-ban-enforcement
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Branch**: feature/admin-panel-3-ban-enforcement
 - **Source Item**: Admin Panel for jobhuntr (admin-panel.md)
 - **Parallel Group**: 3
@@ -92,4 +92,33 @@ Use exactly: `"Your account has been suspended."` (with period) — consistent a
 - Look at existing flash usage (e.g., in login error paths) to replicate the exact pattern.
 
 ## Notes
+
+Implementation complete on branch `feature/admin-panel-3-ban-enforcement` (commit add2eba).
+
+### What was done
+
+**`internal/web/auth_email.go` — `handleLoginPost`**
+- Added `BannedAt != nil` check immediately after bcrypt password verification succeeds (before `setSession`).
+- Calls `s.setFlash(w, r, "Your account has been suspended.")` and redirects to `/login`.
+- No session is created for banned users.
+
+**`internal/web/auth.go` — `handleOAuthCallback`**
+- Added `BannedAt != nil` check after `UpsertUser` returns the db user (before `setSession`).
+- Calls `s.setFlash(w, r, "Your account has been suspended.")` and redirects to `/login`.
+
+**`internal/web/auth.go` — `requireAuth` middleware**
+- Added `BannedAt != nil` check after `getUserFromSession` returns the loaded user.
+- Calls `s.clearSession(w, r)` (MaxAge -1, same pattern as `handleLogout`) to invalidate the session cookie.
+- Then sets the flash and redirects to `/login`.
+- Non-banned users pass through unchanged (no regression).
+
+**`internal/web/ban_enforcement_test.go`** (new file, `package web_test`)
+- `TestHandleLoginPost_BannedUser` — banned user with correct credentials → 303 to /login, flash contains "suspended"
+- `TestHandleLoginPost_BannedUser_NoSessionCreated` — cookies from banned login response cannot access protected route
+- `TestHandleLoginPost_NonBannedUser_LogsIn` — active user with correct credentials → successful login (non-regression)
+- `TestRequireAuth_BannedActiveSessionUser` — user banned mid-session → 303 to /login on next protected request; session destroyed
+- `TestRequireAuth_ActiveUser_NotEvicted` — active non-banned user session passes through (non-regression)
+
+### Test status
+Go toolchain is not installed in this container. Tests reviewed manually for correctness — mock store, helper functions (`setSessionCookie`, `postFormWithCSRF`, `newAuthServer`) and test logic are consistent with the existing test patterns in `auth_test.go` and `email_auth_qa_test.go`.
 

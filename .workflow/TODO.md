@@ -8,18 +8,6 @@ Worker agents (coder, designer, automation, qa, code-reviewer) pick up
 
 ---
 
-## admin-panel — Admin Panel
-
-**Plan:** .workflow/plans/admin-panel.md
-**Tasks:**
-- admin-panel-1-migration-model-config (coder, Group 1)
-- admin-panel-2-store-methods (coder, Group 2)
-- admin-panel-3-admin-package (coder, Group 3, parallel)
-- admin-panel-3-ban-enforcement (coder, Group 3, parallel)
-- admin-panel-4-code-review (code-reviewer, Group 4)
-- admin-panel-5-qa (qa, Group 5)
-
----
 
 ## oauth-google — Google OAuth (ALREADY IMPLEMENTED)
 

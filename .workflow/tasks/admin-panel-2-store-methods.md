@@ -1,7 +1,7 @@
 # Task: admin-panel-2-store-methods
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Branch**: feature/admin-panel-2-store-methods
 - **Source Item**: Admin Panel for jobhuntr (admin-panel.md)
 - **Parallel Group**: 2
@@ -86,3 +86,27 @@ No new packages are introduced. All methods follow the existing store pattern (c
 
 ## Notes
 
+Implementation complete on branch `feature/admin-panel-2-store-methods` (commit 01ea7d3).
+
+### What was implemented
+
+**`internal/store/user.go`**:
+- `AdminFilter` struct — embeds `models.UserSearchFilter` and adds `UserEmail string`
+- `(*Store).ListAllUsers` — selects all users ordered by `created_at DESC` using `userSelectCols` and `scanUser`; correctly populates `BannedAt`
+- `(*Store).BanUser` — `UPDATE users SET banned_at = NOW() WHERE id = $1`
+- `(*Store).UnbanUser` — `UPDATE users SET banned_at = NULL WHERE id = $1`
+- `(*Store).SetPasswordHash` — updates `password_hash` and clears `reset_token` + `reset_expires_at`
+- `(*Store).ListAllFilters` — JOIN with users table, scans into `AdminFilter` fields manually, ordered by `usf.created_at DESC`
+
+**`internal/store/store.go`**:
+- `AdminStats` struct with fields `TotalUsers`, `TotalJobs`, `TotalFilters`, `NewUsersLast7d`
+- `(*Store).GetAdminStats` — four scalar `QueryRow` calls returning aggregate counts
+
+**`internal/store/admin_test.go`** (new file):
+- Table-driven tests for each new method
+- Tests skip automatically if `TEST_DATABASE_URL` is not set (same pattern as existing test suite)
+
+### Build/test status
+- Go is not installed in this container; `go build ./...` and `go test ./internal/store/...` cannot be run here
+- Code was verified by manual inspection against the existing store patterns
+- Tests follow the exact pattern used in `store_test.go` and `user_test.go`

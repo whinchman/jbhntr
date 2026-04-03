@@ -1,7 +1,7 @@
 # Task: admin-panel-1-migration-model-config
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Branch**: feature/admin-panel-1-migration-model-config
 - **Source Item**: Admin Panel for jobhuntr (admin-panel.md)
 - **Parallel Group**: 1
@@ -62,3 +62,14 @@ This task is purely foundational. It produces:
 
 ## Notes
 
+Implementation complete on branch `feature/admin-panel-1-migration-model-config` (commit a8fd97d).
+
+### What was done
+- Created `internal/store/migrations/010_add_banned_at_to_users.sql` with `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ;`
+- Added `BannedAt *time.Time` field to `models.User` struct in `internal/models/user.go`
+- Appended `, banned_at` to `userSelectCols` in `internal/store/user.go` and added `bannedAt sql.NullString` scan variable + `u.BannedAt` assignment in `scanUser`
+- Added `AdminConfig` struct (`Password string \`yaml:"password"\``) and `Admin AdminConfig \`yaml:"admin"\`` field to `Config` in `internal/config/config.go`
+- Added `admin.password` example to `config.yaml.example` with comment
+
+### Test status
+Go toolchain is not installed in this container. Tests require `TEST_DATABASE_URL` and skip without it. Code has been reviewed manually for correctness — column order in `scanUser` matches `userSelectCols`, `IF NOT EXISTS` ensures idempotent migration, `sql.NullString` handles the nullable `TIMESTAMPTZ` via RFC3339 parse (consistent with all other nullable time fields in the same function).

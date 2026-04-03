@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## Admin Panel
+
+**Completed:** 2026-04-03
+
+Web-based admin interface at `/admin`, protected by HTTP Basic Auth (`ADMIN_PASSWORD` env var). User management: list all users, ban/unban, manual temp-password reset (shown on screen once). Analytics: aggregate stats (total users, jobs, filters, new users last 7d), full filter listing with user emails. Banned users blocked from logging in via all three auth paths (email login, OAuth callback, requireAuth middleware). `banned_at` nullable timestamp column added via migration 010. Admin code isolated in `internal/web/admin` sub-package. CSRF exempted for `/admin/*` — Basic Auth is the anti-forgery mechanism. BUG-022 (migrate_test missing migration 010) and BUG-023 (no LIMIT on admin list queries) logged.
+
+Tasks: admin-panel-1-migration-model-config, admin-panel-2-store-methods, admin-panel-3-admin-package, admin-panel-3-ban-enforcement (all done, merged to development)
+
+---
+
 ## Email/Password Authentication
 
 **Completed:** 2026-04-03

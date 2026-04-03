@@ -1,7 +1,7 @@
 # Task: admin-panel-3-admin-package
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Branch**: feature/admin-panel-3-admin-package
 - **Source Item**: Admin Panel for jobhuntr (admin-panel.md)
 - **Parallel Group**: 3
@@ -231,3 +231,50 @@ type adminFiltersData struct {
 
 ## Notes
 
+Implementation complete on branch `feature/admin-panel-3-admin-package` (commit 1ccc5a7).
+Worktree: `/workspace/worktrees/admin-panel-3-admin-package`
+
+### What was implemented
+
+**`internal/web/admin/store.go`**:
+- `AdminStore` interface with all six methods matching `*store.Store` signatures
+
+**`internal/web/admin/admin.go`**:
+- `adminHandler` struct with per-page template sets (dashboard, users, filters)
+- `New()` constructor — parses templates eagerly via `template.Must`
+- `Routes()` — chi router with `adminAuth` middleware and all six routes
+- `adminAuth` middleware — rejects empty password immediately; uses `subtle.ConstantTimeCompare` for both username and password; sets `WWW-Authenticate` header on 401
+
+**`internal/web/admin/handlers.go`**:
+- `handleAdminDashboard` — calls `GetAdminStats`, renders dashboard
+- `handleAdminUsers` — calls `ListAllUsers`, renders users table
+- `handleAdminBanUser` / `handleAdminUnbanUser` — parse `{id}`, call store, redirect to `/admin/users`
+- `handleAdminResetPassword` — generates 12-char alphanumeric temp password via `crypto/rand`, hashes with bcrypt cost 12, calls `SetPasswordHash`, re-renders users page with temp password flash
+- `handleAdminFilters` — calls `ListAllFilters`, renders filters table
+- `generateTempPassword()` — 62-character charset, `crypto/rand`, 12 bytes
+- `parseUserID()` — extracts and validates `{id}` URL param
+
+**`internal/web/admin/templates/`**:
+- `admin_layout.html` — PicoCSS CDN shell, nav with Dashboard / Users / Filters links
+- `admin_dashboard.html` — four stat cards
+- `admin_users.html` — user table with ban/unban/reset actions; temp-password flash block
+- `admin_filters.html` — filter table with joined user email
+
+**`internal/web/server.go`**:
+- `adminStore admin.AdminStore` field added to `Server` struct
+- `WithAdminStore(as admin.AdminStore) *Server` chainable setter
+- `/admin` mount via `r.Mount` in `Handler()`, guarded by `cfg != nil && adminStore != nil && cfg.Admin.Password != ""`
+
+**`cmd/jobhuntr/main.go`**:
+- `.WithAdminStore(db)` chained in server builder
+
+**`internal/web/admin/admin_test.go`** (new file):
+- `TestAdminAuth` — table-driven: no header / wrong username / wrong password / correct credentials
+- `TestAdminAuthEmptyPassword` — verifies empty password always returns 401
+- `TestAdminDashboardRendersOK`, `TestAdminUsersRendersOK`, `TestAdminFiltersRendersOK`
+- `TestAdminBanUserRedirects`, `TestAdminUnbanUserRedirects` — verify 303 redirect to `/admin/users`
+- `TestAdminResetPasswordRendersPage` — verifies 200 re-render with temp password
+- `TestAdminInvalidUserID` — verifies 400 on non-numeric `{id}`
+
+### Build/test status
+Go is not installed in this container; `go build ./...` and `go test ./internal/web/admin/...` cannot be run here. Code was verified by manual inspection against existing patterns. All acceptance criteria have been addressed in the implementation.
