@@ -60,6 +60,7 @@ type JobStore interface {
 	GetJob(ctx context.Context, userID int64, id int64) (*models.Job, error)
 	ListJobs(ctx context.Context, userID int64, f store.ListJobsFilter) ([]models.Job, error)
 	UpdateJobStatus(ctx context.Context, userID int64, id int64, status models.JobStatus) error
+	UpdateApplicationStatus(ctx context.Context, userID int64, jobID int64, status models.ApplicationStatus) error
 }
 
 // UserStore is the subset of store.Store used by the auth system.

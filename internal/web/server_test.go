@@ -78,6 +78,20 @@ func (m *mockJobStore) UpdateJobStatus(_ context.Context, userID int64, id int64
 	return nil
 }
 
+func (m *mockJobStore) UpdateApplicationStatus(_ context.Context, userID int64, id int64, status models.ApplicationStatus) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return fmt.Errorf("store: job %d not found", id)
+	}
+	if userID != 0 && j.UserID != userID {
+		return fmt.Errorf("store: job %d not found", id)
+	}
+	j.ApplicationStatus = status
+	return nil
+}
+
 // ─── mock FilterStore ───────────────────────────────────────────────────────
 
 type mockFilterStore struct {
