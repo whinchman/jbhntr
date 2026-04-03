@@ -1,7 +1,7 @@
 # Task: local-debug-1-infra
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Repo**: . (single repo — /workspace)
 - **Parallel Group**: 1
 - **Branch**: feature/local-debug-1-infra
@@ -185,4 +185,18 @@ The main package is at `./cmd/jobhuntr` (verify by checking `go.mod` and `cmd/` 
 
 ## Notes
 
-<!-- Implementing agent fills this in when complete -->
+**Branch**: `feature/local-debug-1-infra`
+**Commit**: `5efd53c`
+
+All 8 files implemented in a single commit:
+
+- `.env.example` — updated to match plan spec (DATABASE_URL commented out, SESSION_SECRET required with default dev value, GitHub OAuth required, Google/SERPAPI/ANTHROPIC optional)
+- `.air.toml` — created with watches on `cmd/` and `internal/`, builds to `./tmp/air-main`, excludes `tmp/`, `output/`, `worktrees/`, `.workflow/`
+- `Dockerfile.dev` — created based on `golang:1.25-bookworm`, installs chromium and air via `go install`, CMD is `air`
+- `docker-compose.yml` — added `dev` service with `profiles: [dev]`, `go-mod-cache` volume, mounts source at `/workspace`, depends on `db` with health check
+- `Makefile` — created with all 9 required targets; `make test` runs `go test ./...`, `make build` builds to `bin/jobhuntr`
+- `run.sh` — warning block extended to check `DATABASE_URL` and `SESSION_SECRET` (required), `ANTHROPIC_API_KEY (optional)` and `SERPAPI_KEY (optional)` retained
+- `.gitignore` — `tmp/` added
+- `agent.yaml` — `testing.command` changed from `npm test` to `go test ./...`
+
+**Test run**: Go toolchain not available in this container (Linux agent container, no Go SDK installed). Source changes are structurally correct. `go test ./...` should be verified on a machine with Go 1.25 installed.

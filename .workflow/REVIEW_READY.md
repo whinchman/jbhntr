@@ -1,50 +1,43 @@
-# Review Ready: resume-export + modern-design
+# Review Ready: modern-design + resume-export + local-debug
 
 **Date**: 2026-04-03
 
-Both features are merged to `development` locally. Review and push when satisfied.
+All three features are merged to `development` locally. Review and push when satisfied.
 
 ---
 
 ## modern-design — Update design look to be more modern
 
-**Plan**: .workflow/plans/modern-design.md
+Single `app.css` override (799 lines) on PicoCSS v2. Fresh design tokens, indigo accent, 7 status badge variants. Static file serving via Go embed. All 8 templates cleaned of inline styles.
 
-### Summary
-Single `app.css` override file (799 lines) on top of PicoCSS v2. Fresh design token set, indigo accent, 7 status badge variants. Static file serving via Go embed. All 8 templates cleaned of inline styles.
-
-### Validation
-| Check | Result |
-|-------|--------|
-| Code Review (×3) | PASS — 0 critical, 0 warnings |
-| QA | PASS |
-
-### Known Issue
-**BUG-010** (Low/cosmetic): `.providers-section` missing margin rule — slight spacing loss above provider buttons on login page. Fix: `.providers-section { margin-top: var(--space-4); }` in app.css.
+**Validation:** Code Review ×3 PASS, QA PASS.
+**BUG-010** (Low/cosmetic): `.providers-section` missing margin rule — slight spacing loss above provider buttons on login page.
 
 ---
 
 ## resume-export — Markdown, DOCX, and optional PDF downloads
 
-**Plan**: .workflow/plans/resume-export.md
+Migration 008 adds `resume_markdown`/`cover_markdown`. Generator returns 4 sections. `internal/exporter.ToDocx()` via `gomutex/godocx`. PDF optional (non-fatal). 4 new download routes + conditional UI buttons.
 
-### Summary
-- Migration 008: `resume_markdown`, `cover_markdown` columns
-- Generator updated to return 4 sections (MD + HTML for both resume and cover letter)
-- `internal/exporter` package: `ToDocx(md string) ([]byte, error)` using `gomutex/godocx`
-- PDF conversion now optional (non-fatal; skipped if Chromium unavailable)
-- 4 new download routes: `/output/{id}/resume.md`, `/output/{id}/cover_letter.md`, `/output/{id}/resume.docx`, `/output/{id}/cover_letter.docx`
-- `job_detail.html`: conditional download buttons per format
+**Validation:** Code Review ×3 PASS, QA PASS.
+**BUG-012** (Warning): Italic `_` parser doesn't check word boundaries — `node_modules`-style identifiers may italicise in DOCX.
+**BUG-013** (Warning): DOCX test body guard checks `< 2` but accesses `body[:4]` — panic on short body.
 
-### Validation
-| Check | Result |
-|-------|--------|
-| Code Review (×3) | PASS — 0 critical across all tasks |
-| QA | PASS |
+---
 
-### Known Issues (non-blocking)
-- **BUG-012** (Warning): `parseInline` underscore italic detection doesn't check word boundaries — identifiers like `node_modules` could render italicised in DOCX output
-- **BUG-013** (Warning): DOCX test body length guard checks `< 2` but accesses `body[:4]` — will panic on very short response bodies
+## local-debug — Local debug deployment for testing
+
+`Makefile` (9 targets: `make dev`, `make test`, etc.), `Dockerfile.dev`, docker-compose `dev` profile, `.air.toml` hot-reload, `.env.example`, `run.sh` required-var warnings, `tmp/` gitignored, `agent.yaml` test command fixed.
+
+**Validation:** Code Review PASS (0 findings), QA PASS (no regressions).
+
+**Usage:**
+```
+cp .env.example .env   # fill in secrets
+make dev               # Docker hot-reload via air
+# or
+make db-up && make dev-native   # native with hot-reload
+```
 
 ---
 

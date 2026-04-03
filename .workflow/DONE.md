@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## Local Debug Deployment
+
+**Completed:** 2026-04-03
+
+Added full local dev infrastructure: `Makefile` (9 targets), `Dockerfile.dev` (golang:1.25-bookworm + Chromium + air), `docker-compose.yml` dev profile, `.air.toml` hot-reload, `.env.example` updated, `run.sh` required-var warnings, `.gitignore` + `agent.yaml` fixed.
+
+Tasks: local-debug-1-infra (done, merged to development)
+
+---
+
 ## Resume/Cover Letter Export Formats
 
 **Completed:** 2026-04-03
