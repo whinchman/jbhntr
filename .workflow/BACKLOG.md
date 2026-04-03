@@ -11,7 +11,3 @@ items into tasks, then moves them to TODO.md.
 
 ## Features
 
-- [ ] Oauth via google
-- [ ] resume/coverletter download in markdown
-- [ ] resume/coverletter optional generation/download in docx format 
-- [ ] make PDF generation/download optional for resume cover letter

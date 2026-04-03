@@ -1,7 +1,7 @@
 # Task: modern-design-1-css-static
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Repo**: . (root — single repo at /workspace)
 - **Parallel Group**: 1
 - **Branch**: feature/modern-design-1
@@ -241,4 +241,35 @@ Placing `app.css` inside `templates/static/` is sufficient — the existing embe
 
 ## Notes
 
-<!-- Implementing agent fills this in when complete -->
+**Completed by Coder Agent — 2026-04-03**
+
+**Branch**: `feature/modern-design-1`
+
+**What was implemented**:
+
+1. Created `internal/web/templates/static/app.css` (807 lines) containing:
+   - All design tokens in `:root` (colours, typography, spacing, radius, shadow)
+   - All Pico CSS v2 variable overrides (`--pico-*` mapped to tokens)
+   - `.app-nav`, `.app-nav-inner`, `.app-nav-brand`, `.app-nav-links`, `.app-nav-user`, `.nav-avatar` with mobile collapse at ≤639px
+   - `.status-badge` base class and all 7 status variant classes
+   - `.tab-bar` and tab interaction styles (pill shape, indigo active state)
+   - `.job-table`, `.job-table-wrapper`, `.job-table-empty`, `.job-summary-row`
+   - Form overrides: label, `input:focus`, `select:focus`, `textarea:focus` (indigo focus ring), `.filter-form-grid` (responsive 640px/900px breakpoints), `.inline-form`, `textarea.mono`
+   - Button styles: base `button`/`[role="button"]`, `.outline`, `.danger`, `.secondary`, `.btn-sm`
+   - `.card`, `.card-header`
+   - `.alert`, `.alert-success`, `.alert-danger`, `.alert-warning`, `.alert-info`
+   - `.hero`, `.hero h1`, `.hero p`, `.hero a[role="button"]`
+   - `.login-card`, `body.login-page`, `.login-card-header`, `.provider-btn`, `.provider-btn-google`, `.provider-btn-github`
+   - `.avatar` (48px circle)
+   - `.job-description`, `.document-preview`
+   - `.empty-state`
+   - Utility classes: `.text-muted`, `.text-success`, `.text-danger`, `.text-warning`, `.text-accent`, `.sr-only`, `.d-flex`, `.gap-2`, `.gap-3`, `.mt-0`, `.mb-0`, `.mb-4`
+   - Responsive breakpoints for nav collapse (≤639px), filter grid (640px, 900px), container padding (768px)
+
+2. Modified `internal/web/server.go`:
+   - Added `"io/fs"` to imports
+   - Added `/static/*` route using `fs.Sub(templateFS, "templates/static")` + `http.StripPrefix` + `http.FileServer` in `Handler()`
+
+**Build note**: Go toolchain not available in this container — `go build ./...` could not be verified locally. The code follows the exact pattern specified in the Interface Contracts section. All acceptance criteria for CSS classes are met. Build verification must be performed on a machine with Go installed.
+
+**Tests**: No npm tests or Go tests applicable; `testing.command = "npm test"` but no package.json exists in this Go project.
