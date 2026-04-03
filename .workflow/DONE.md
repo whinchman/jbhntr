@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## Job Pipeline Pages + Application Status
+
+**Completed:** 2026-04-03
+
+Dashboard trimmed to triage-only (discovered/notified jobs). New `/jobs/approved` page is the primary home for application status tracking (Applied, Interviewing, Won, Lost) with HTMX inline `<select>` and COALESCE timestamp preservation (first-entry date survives repeated state changes). New `/jobs/rejected` page shows a read-only 5-column archive. Migration 011 adds `application_status TEXT CHECK(...)` + four nullable `TIMESTAMPTZ` columns to `jobs`. `UpdateApplicationStatus` enforces pipeline-stage check (only approved-stage jobs can have status set). BUG-024 through BUG-029 logged (duplicate test INSERTs, mock filter gap, column alignment fixes). migrate_test.go updated to cover all 11 migrations, resolving BUGs 014, 018, 022.
+
+Tasks: job-pipeline-1-migration, job-pipeline-2-models-store, job-pipeline-3-web, job-pipeline-4-templates, job-pipeline-5-code-review, job-pipeline-6-qa (all done, merged to development)
+
+---
+
 ## Admin Panel
 
 **Completed:** 2026-04-03
