@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## Email/Password Authentication
+
+**Completed:** 2026-04-03
+
+Replaced OAuth-only login with full email+password auth. OAuth gated behind `auth.oauth.enabled` config flag (preserved but off by default). New: registration, login, forgot-password, reset-password, email-verification flows. `internal/mailer` package with SMTPMailer + NoopMailer fallback. Migration 009 adds password_hash, verify/reset tokens. Per-IP rate limiting (5 req/min) on all auth POSTs. bcrypt cost 12, crypto/rand 32-byte tokens, single-use consume pattern. 5 browser templates + 2 HTML email templates. BUG-021 (integration tests using SQLite DSN) logged for future fix.
+
+Tasks: email-auth-1-migration-models, email-auth-1-mailer, email-auth-1-config, email-auth-2-server-wiring, email-auth-3-handlers, email-auth-3-templates (all done, merged to development)
+
+---
+
 ## Local Debug Deployment
 
 **Completed:** 2026-04-03
