@@ -20,6 +20,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/whinchman/jobhuntr/internal/config"
+	"github.com/whinchman/jobhuntr/internal/exporter"
 	"github.com/whinchman/jobhuntr/internal/models"
 	"github.com/whinchman/jobhuntr/internal/store"
 )
@@ -237,6 +238,10 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/jobs/{id}", s.handleJobDetail)
 		r.Get("/output/{id}/resume.pdf", s.handleDownloadResume)
 		r.Get("/output/{id}/cover_letter.pdf", s.handleDownloadCover)
+		r.Get("/output/{id}/resume.md", s.handleDownloadResumeMarkdown)
+		r.Get("/output/{id}/cover_letter.md", s.handleDownloadCoverMarkdown)
+		r.Get("/output/{id}/resume.docx", s.handleDownloadResumeDocx)
+		r.Get("/output/{id}/cover_letter.docx", s.handleDownloadCoverDocx)
 
 		r.Get("/settings", s.handleSettings)
 		r.Post("/settings/resume", s.handleSaveResume)
@@ -963,6 +968,130 @@ func (s *Server) handleDownloadCover(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Disposition", "attachment; filename=cover_letter.pdf")
 	http.ServeFile(w, r, job.CoverPDF)
+}
+
+func (s *Server) handleDownloadResumeMarkdown(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "failed to get job", http.StatusInternalServerError)
+		return
+	}
+	if job.ResumeMarkdown == "" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=resume.md")
+	_, _ = w.Write([]byte(job.ResumeMarkdown))
+}
+
+func (s *Server) handleDownloadCoverMarkdown(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "failed to get job", http.StatusInternalServerError)
+		return
+	}
+	if job.CoverMarkdown == "" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=cover_letter.md")
+	_, _ = w.Write([]byte(job.CoverMarkdown))
+}
+
+func (s *Server) handleDownloadResumeDocx(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "failed to get job", http.StatusInternalServerError)
+		return
+	}
+	if job.ResumeMarkdown == "" {
+		http.NotFound(w, r)
+		return
+	}
+	docxBytes, err := exporter.ToDocx(job.ResumeMarkdown)
+	if err != nil {
+		slog.Error("failed to generate resume docx", "error", err, "job_id", id)
+		http.Error(w, "failed to generate document", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	w.Header().Set("Content-Disposition", "attachment; filename=resume.docx")
+	_, _ = w.Write(docxBytes)
+}
+
+func (s *Server) handleDownloadCoverDocx(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	user := UserFromContext(r.Context())
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	job, err := s.store.GetJob(r.Context(), userID, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "failed to get job", http.StatusInternalServerError)
+		return
+	}
+	if job.CoverMarkdown == "" {
+		http.NotFound(w, r)
+		return
+	}
+	docxBytes, err := exporter.ToDocx(job.CoverMarkdown)
+	if err != nil {
+		slog.Error("failed to generate cover letter docx", "error", err, "job_id", id)
+		http.Error(w, "failed to generate document", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	w.Header().Set("Content-Disposition", "attachment; filename=cover_letter.docx")
+	_, _ = w.Write(docxBytes)
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
