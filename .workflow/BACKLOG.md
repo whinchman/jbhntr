@@ -11,4 +11,4 @@ items into tasks, then moves them to TODO.md.
 
 ## Features
 
-- [ ] Table text color is same color as background when table cells are not highlighted - see .workflow/bugimgs/table-hightlight.jpg & .workflow/bugimgs/table-no-highlight.jpg
+
