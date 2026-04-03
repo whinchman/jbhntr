@@ -1,7 +1,100 @@
-Please verify your email address by clicking the link below:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify your email — JobHuntr</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f8f9fb;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;">
 
-{{.VerifyURL}}
+  <!-- Wrapper -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="background-color:#f8f9fb;padding:40px 16px;">
+    <tr>
+      <td align="center">
 
-This link expires in 24 hours.
+        <!-- Card -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0"
+               style="max-width:480px;background-color:#ffffff;border:1px solid #e2e5ec;
+                      border-radius:12px;overflow:hidden;">
 
-If you did not create an account, you can safely ignore this email.
+          <!-- Header -->
+          <tr>
+            <td style="padding:32px 40px 24px;text-align:center;
+                       border-bottom:1px solid #e2e5ec;">
+              <p style="margin:0;font-size:22px;font-weight:700;color:#1a1d23;">
+                JobHuntr
+              </p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 40px;">
+              <p style="margin:0 0 16px;font-size:16px;color:#1a1d23;line-height:1.5;">
+                Hi {{.DisplayName}},
+              </p>
+              <p style="margin:0 0 24px;font-size:15px;color:#6b7280;line-height:1.6;">
+                Thanks for signing up. Click the button below to verify your email
+                address and activate your JobHuntr account.
+              </p>
+
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" style="padding-bottom:24px;">
+                    <a href="{{.VerifyURL}}"
+                       style="display:inline-block;padding:14px 32px;
+                              background-color:#4f46e5;color:#ffffff;
+                              font-size:15px;font-weight:600;text-decoration:none;
+                              border-radius:8px;">
+                      Verify email address
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 8px;font-size:13px;color:#6b7280;line-height:1.5;">
+                This link expires in <strong>24 hours</strong>.
+              </p>
+              <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.5;">
+                If you didn't create a JobHuntr account, you can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Fallback URL -->
+          <tr>
+            <td style="padding:0 40px 24px;">
+              <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.5;">
+                If the button doesn't work, copy and paste this link into your browser:
+              </p>
+              <p style="margin:4px 0 0;font-size:12px;word-break:break-all;">
+                <a href="{{.VerifyURL}}"
+                   style="color:#4f46e5;text-decoration:underline;">
+                  {{.VerifyURL}}
+                </a>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 40px;background-color:#f8f9fb;
+                       border-top:1px solid #e2e5ec;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#6b7280;">
+                © {{.Year}} JobHuntr. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Card -->
+
+      </td>
+    </tr>
+  </table>
+  <!-- /Wrapper -->
+
+</body>
+</html>

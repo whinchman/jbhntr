@@ -1,17 +1,62 @@
 {{define "register.html"}}
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Register</title></head>
-<body>
-<h1>Register</h1>
-{{if .Flash}}<p class="error">{{.Flash}}</p>{{end}}
-<form method="POST" action="/register">
-  <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
-  <label>Display Name: <input type="text" name="display_name" value="{{.Form.DisplayName}}"></label><br>
-  <label>Email: <input type="email" name="email" value="{{.Form.Email}}"></label><br>
-  <label>Password: <input type="password" name="password"></label><br>
-  <button type="submit">Register</button>
-</form>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobHuntr — Create Account</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-page">
+  <article class="login-card">
+    <header class="login-card-header">
+      <h1>JobHuntr</h1>
+      <p>Create your account</p>
+    </header>
+
+    {{if .Flash}}
+    <div class="alert alert-danger" role="alert">{{.Flash}}</div>
+    {{end}}
+
+    <form method="post" action="/register">
+      <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+
+      <label for="display_name">
+        Display name
+        <small>How you'll appear to others</small>
+        <input id="display_name" type="text" name="display_name" autocomplete="name"
+               placeholder="Alex Smith" required autofocus maxlength="100"
+               value="{{.Form.DisplayName}}">
+      </label>
+
+      <label for="email">
+        Email address
+        <input id="email" type="email" name="email" autocomplete="email"
+               placeholder="you@example.com" required
+               value="{{.Form.Email}}">
+      </label>
+
+      <label for="password">
+        Password
+        <small>At least 8 characters</small>
+        <input id="password" type="password" name="password" autocomplete="new-password"
+               placeholder="••••••••" required minlength="8">
+      </label>
+
+      <label for="confirm_password">
+        Confirm password
+        <input id="confirm_password" type="password" name="confirm_password"
+               autocomplete="new-password" placeholder="••••••••" required>
+      </label>
+
+      <button type="submit">Create account</button>
+    </form>
+
+    <footer class="login-card-footer">
+      <p>Already have an account? <a href="/login">Sign in</a></p>
+    </footer>
+  </article>
 </body>
 </html>
 {{end}}
