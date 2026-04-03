@@ -5,6 +5,16 @@ to the default branch.
 
 ---
 
+## Resume/Cover Letter Export Formats
+
+**Completed:** 2026-04-03
+
+Added Markdown and DOCX download formats for generated resumes and cover letters. PDF generation made optional (non-fatal on failure). New `internal/exporter` package converts Markdown to DOCX using `gomutex/godocx`. Migration 008 adds `resume_markdown`/`cover_markdown` columns. Four new download routes + conditional UI buttons in `job_detail.html`. BUG-012 (underscore word-boundary in italic parser) and BUG-013 (test body length guard) logged for future fix.
+
+Tasks: resume-export-1-foundation, resume-export-2-exporter, resume-export-3-routes (all done, merged to development)
+
+---
+
 ## Modern Design Refresh
 
 **Completed:** 2026-04-03

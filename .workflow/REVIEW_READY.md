@@ -1,34 +1,54 @@
-# Review Ready: modern-design
+# Review Ready: resume-export + modern-design
 
 **Date**: 2026-04-03
-**Feature**: Update design look to be more modern
+
+Both features are merged to `development` locally. Review and push when satisfied.
+
+---
+
+## modern-design — Update design look to be more modern
+
 **Plan**: .workflow/plans/modern-design.md
-**Design spec**: .workflow/plans/modern-design-spec.md
 
-## Summary of Changes
+### Summary
+Single `app.css` override file (799 lines) on top of PicoCSS v2. Fresh design token set, indigo accent, 7 status badge variants. Static file serving via Go embed. All 8 templates cleaned of inline styles.
 
-**`internal/web/templates/static/app.css`** (new, 799 lines) — single stylesheet overriding PicoCSS v2 custom properties with a fresh token set. Indigo-600 accent, neutral off-white background, 7 status badge variants, full component coverage (nav, tables, forms, buttons, cards, alerts, login page, hero section).
-
-**`internal/web/server.go`** — added `"io/fs"` import and `/static/*` route serving embedded CSS publicly (before auth subrouters).
-
-**`layout.html` + `login.html`** — inline `<style>` blocks removed, `/static/app.css` link added, all elements updated to semantic CSS classes.
-
-**`dashboard.html`, `job_detail.html`, `partials/job_rows.html`, `settings.html`, `profile.html`, `onboarding.html`** — all `style=""` attributes removed, replaced with CSS classes.
-
-## Validation Summary
-
+### Validation
 | Check | Result |
 |-------|--------|
-| Code Review (tasks 1, 2, 3) | PASS — 0 critical, 0 warnings |
+| Code Review (×3) | PASS — 0 critical, 0 warnings |
 | QA | PASS |
 
-## Known Issues
+### Known Issue
+**BUG-010** (Low/cosmetic): `.providers-section` missing margin rule — slight spacing loss above provider buttons on login page. Fix: `.providers-section { margin-top: var(--space-4); }` in app.css.
 
-**BUG-010** (Low/cosmetic): `.providers-section` class used in `login.html:23` has no rule in `app.css`. Slight top-margin loss above provider buttons on the login page. Fix: add `.providers-section { margin-top: var(--space-4); }` to app.css login section (section 12).
+---
+
+## resume-export — Markdown, DOCX, and optional PDF downloads
+
+**Plan**: .workflow/plans/resume-export.md
+
+### Summary
+- Migration 008: `resume_markdown`, `cover_markdown` columns
+- Generator updated to return 4 sections (MD + HTML for both resume and cover letter)
+- `internal/exporter` package: `ToDocx(md string) ([]byte, error)` using `gomutex/godocx`
+- PDF conversion now optional (non-fatal; skipped if Chromium unavailable)
+- 4 new download routes: `/output/{id}/resume.md`, `/output/{id}/cover_letter.md`, `/output/{id}/resume.docx`, `/output/{id}/cover_letter.docx`
+- `job_detail.html`: conditional download buttons per format
+
+### Validation
+| Check | Result |
+|-------|--------|
+| Code Review (×3) | PASS — 0 critical across all tasks |
+| QA | PASS |
+
+### Known Issues (non-blocking)
+- **BUG-012** (Warning): `parseInline` underscore italic detection doesn't check word boundaries — identifiers like `node_modules` could render italicised in DOCX output
+- **BUG-013** (Warning): DOCX test body length guard checks `< 2` but accesses `body[:4]` — will panic on very short response bodies
+
+---
 
 ## To Ship
-
-The feature is merged to `development` locally. When satisfied:
 
 ```
 git push origin development

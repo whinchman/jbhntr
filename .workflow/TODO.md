@@ -8,16 +8,6 @@ Worker agents (coder, designer, automation, qa, code-reviewer) pick up
 
 ---
 
-## resume-export — Markdown, DOCX, and optional PDF downloads
-
-**Plan:** `.workflow/plans/resume-export.md`
-**Tasks:**
-- [ ] `resume-export-1-foundation` (Group 1) — Migration, models, generator interface, optional PDF
-- [ ] `resume-export-2-exporter` (Group 2) — internal/exporter DOCX package
-- [ ] `resume-export-3-routes` (Group 3) — Download routes + UI buttons
-- [ ] `resume-export-4-review` (Group 4, parallel) — Code review
-- [ ] `resume-export-5-qa` (Group 4, parallel) — QA
-
 ## oauth-google — Google OAuth (ALREADY IMPLEMENTED)
 
 **Note:** Architect confirmed Google OAuth is fully implemented in `internal/web/auth.go`.
