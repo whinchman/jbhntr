@@ -1,24 +1,23 @@
 package generator
 
-const separator = "---SEPARATOR---"
+const (
+	sepResumeMD   = "---RESUME_MD---"
+	sepResumeHTML = "---RESUME_HTML---"
+	sepCoverMD    = "---COVER_MD---"
+	sepCoverHTML  = "---COVER_HTML---"
+)
 
 const systemPrompt = `You are an expert resume writer and career coach.
-Given a job listing and a base resume in Markdown, produce two complete HTML documents:
-1. A tailored resume that highlights the candidate's most relevant experience, skills, and achievements for this specific job.
-2. A professional cover letter addressed to the hiring team.
+Given a job listing and a base resume in Markdown, produce four sections in this exact format with no extra text:
 
-Output ONLY the two HTML documents in this exact format — nothing else before, between, or after:
-
-<html>
-[tailored resume HTML here]
-</html>
----SEPARATOR---
-<html>
-[cover letter HTML here]
-</html>
-
-Both documents must be self-contained valid HTML with inline CSS styles, suitable for PDF conversion.
-Do not include any explanation, preamble, or commentary outside the HTML tags.`
+---RESUME_MD---
+[tailored resume in Markdown]
+---RESUME_HTML---
+[tailored resume as self-contained HTML with inline CSS for PDF printing]
+---COVER_MD---
+[professional cover letter in Markdown]
+---COVER_HTML---
+[cover letter as self-contained HTML with inline CSS for PDF printing]`
 
 const userPromptTemplate = `Job Title: %s
 Company: %s

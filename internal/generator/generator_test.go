@@ -53,38 +53,55 @@ const sampleResume = `# Jane Doe
 - Software Engineer at FooCo
 `
 
+// buildFourSectionResponse assembles a valid four-section response using the
+// separator constants defined in prompts.go.
+func buildFourSectionResponse(resumeMD, resumeHTML, coverMD, coverHTML string) string {
+	return sepResumeMD + "\n" + resumeMD + "\n" +
+		sepResumeHTML + "\n" + resumeHTML + "\n" +
+		sepCoverMD + "\n" + coverMD + "\n" +
+		sepCoverHTML + "\n" + coverHTML
+}
+
 func TestGenerate(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("parses resume and cover letter from response", func(t *testing.T) {
+	t.Run("parses all four sections from response", func(t *testing.T) {
+		resumeMD := "# Resume in Markdown"
 		resumeHTML := "<html><body><h1>Resume</h1></body></html>"
+		coverMD := "# Cover Letter in Markdown"
 		coverHTML := "<html><body><h1>Cover Letter</h1></body></html>"
-		responseText := resumeHTML + "\n" + separator + "\n" + coverHTML
+		responseText := buildFourSectionResponse(resumeMD, resumeHTML, coverMD, coverHTML)
 
 		gen := newTestGenerator(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(makeAnthropicResponse(responseText))
 		})
 
-		gotResume, gotCover, err := gen.Generate(ctx, sampleJob(), sampleResume)
+		gotResumeMD, gotResumeHTML, gotCoverMD, gotCoverHTML, err := gen.Generate(ctx, sampleJob(), sampleResume)
 		if err != nil {
 			t.Fatalf("Generate() error = %v", err)
 		}
-		if !strings.Contains(gotResume, "Resume") {
-			t.Errorf("resumeHTML = %q, want to contain 'Resume'", gotResume)
+		if !strings.Contains(gotResumeMD, "Resume in Markdown") {
+			t.Errorf("resumeMD = %q, want to contain 'Resume in Markdown'", gotResumeMD)
 		}
-		if !strings.Contains(gotCover, "Cover Letter") {
-			t.Errorf("coverHTML = %q, want to contain 'Cover Letter'", gotCover)
+		if !strings.Contains(gotResumeHTML, "Resume") {
+			t.Errorf("resumeHTML = %q, want to contain 'Resume'", gotResumeHTML)
+		}
+		if !strings.Contains(gotCoverMD, "Cover Letter in Markdown") {
+			t.Errorf("coverMD = %q, want to contain 'Cover Letter in Markdown'", gotCoverMD)
+		}
+		if !strings.Contains(gotCoverHTML, "Cover Letter") {
+			t.Errorf("coverHTML = %q, want to contain 'Cover Letter'", gotCoverHTML)
 		}
 	})
 
-	t.Run("returns error when separator is missing", func(t *testing.T) {
+	t.Run("returns error when RESUME_MD separator is missing", func(t *testing.T) {
 		gen := newTestGenerator(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(makeAnthropicResponse("<html>only resume, no separator</html>"))
+			json.NewEncoder(w).Encode(makeAnthropicResponse("<html>only resume, no separators</html>"))
 		})
 
-		_, _, err := gen.Generate(ctx, sampleJob(), sampleResume)
+		_, _, _, _, err := gen.Generate(ctx, sampleJob(), sampleResume)
 		if err == nil {
 			t.Error("Generate() expected error for missing separator, got nil")
 		}
@@ -96,7 +113,7 @@ func TestGenerate(t *testing.T) {
 			w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"internal server error"}}`))
 		})
 
-		_, _, err := gen.Generate(ctx, sampleJob(), sampleResume)
+		_, _, _, _, err := gen.Generate(ctx, sampleJob(), sampleResume)
 		if err == nil {
 			t.Error("Generate() expected error for API failure, got nil")
 		}
