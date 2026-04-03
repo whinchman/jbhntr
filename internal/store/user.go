@@ -20,7 +20,7 @@ var ErrEmailTaken = errors.New("store: email already taken")
 const userSelectCols = `id, provider, provider_id, email, display_name, avatar_url,
        resume_markdown, onboarding_complete, ntfy_topic, created_at, last_login_at,
        password_hash, email_verified, email_verify_token, email_verify_expires_at,
-       reset_token, reset_expires_at`
+       reset_token, reset_expires_at, banned_at`
 
 // ListActiveUserIDs returns the IDs of all users that have at least one
 // search filter configured. These are the users the scheduler should scrape
@@ -379,13 +379,14 @@ func scanUser(s scanner) (*models.User, error) {
 	var emailVerifyExpiresAt sql.NullString
 	var resetToken sql.NullString
 	var resetExpiresAt sql.NullString
+	var bannedAt sql.NullString
 
 	err := s.Scan(
 		&u.ID, &u.Provider, &u.ProviderID, &u.Email,
 		&u.DisplayName, &u.AvatarURL, &u.ResumeMarkdown,
 		&onboardingComplete, &u.NtfyTopic, &createdAt, &lastLoginAt,
 		&passwordHash, &emailVerified, &emailVerifyToken, &emailVerifyExpiresAt,
-		&resetToken, &resetExpiresAt,
+		&resetToken, &resetExpiresAt, &bannedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -421,6 +422,11 @@ func scanUser(s scanner) (*models.User, error) {
 	if resetExpiresAt.Valid {
 		if t, err := time.Parse(time.RFC3339, resetExpiresAt.String); err == nil {
 			u.ResetExpiresAt = &t
+		}
+	}
+	if bannedAt.Valid {
+		if t, err := time.Parse(time.RFC3339, bannedAt.String); err == nil {
+			u.BannedAt = &t
 		}
 	}
 
