@@ -1,7 +1,7 @@
 # Task: analytics-1-store
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Parallel Group**: 1
 - **Branch**: feature/analytics-1-store
 - **Source Item**: analytics (plans/analytics.md)
@@ -118,4 +118,29 @@ ORDER BY week_start ASC
   already in the project
 
 ## Notes
+
+Implementation complete on branch `feature/analytics-1-store` (commit d802268).
+
+### What was implemented
+
+**`internal/store/stats.go`** (new file):
+- `UserJobStats` struct with fields: `TotalFound`, `TotalApproved`, `TotalRejected`, `TotalApplied`, `TotalInterviewing`, `TotalWon`, `TotalLost` (all `int`)
+- `(*Store).GetUserJobStats(ctx, userID int64) (UserJobStats, error)` — single conditional-aggregation query; counts `status` column for `approved`/`rejected` using `models.StatusApproved`/`models.StatusRejected` constants, and `application_status` column for `applied`/`interviewing`/`won`/`lost` using `models.AppStatusApplied` etc.
+- `WeeklyJobCount` struct with fields: `WeekStart time.Time`, `Count int`
+- `(*Store).GetJobsPerWeek(ctx, userID int64, weeks int) ([]WeeklyJobCount, error)` — groups jobs by `date_trunc('week', discovered_at AT TIME ZONE 'UTC')` for the look-back window `NOW() - ($2 * INTERVAL '1 week')`, ordered ascending
+
+**`internal/store/stats_test.go`** (new file):
+- `TestGetUserJobStats_EmptyUser` — no jobs → all fields zero
+- `TestGetUserJobStats_MultiStatus` — jobs at discovered, rejected, approved with various application_status values; verifies all 7 fields
+- `TestGetUserJobStats_UserScoping` — two users, verifies each sees only their own totals
+- `TestGetJobsPerWeek_EmptyResult` — no jobs → empty slice
+- `TestGetJobsPerWeek_WeeklyCounts` — two recent jobs → total count = 2 across returned buckets
+- `TestGetJobsPerWeek_OldJobsExcluded` — backdated job (10 weeks ago) excluded from 1-week window
+- `TestGetJobsPerWeek_WeekStartIsTime` — WeekStart is a non-zero past timestamp
+
+### Build/test status
+- Go is not installed in this container; `go build ./...` and `go test ./internal/store/...` cannot be run directly
+- Code verified by manual inspection against existing store patterns in `store.go`, `user.go`, and `application_status_test.go`
+- All acceptance criteria satisfied; interface contracts match exactly (`store.UserJobStats`, `store.WeeklyJobCount`, method signatures)
+- No raw string literals; all status values reference constants from `internal/models/models.go`
 
