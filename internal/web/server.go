@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -500,7 +501,10 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	var bannedTermStrings []string
 	if s.filterStore != nil && user != nil {
-		bannedTerms, _ := s.filterStore.ListUserBannedTerms(r.Context(), userID)
+		bannedTerms, err := s.filterStore.ListUserBannedTerms(r.Context(), userID)
+		if err != nil {
+			slog.Warn("failed to load banned terms for dashboard", "error", err, "user_id", userID)
+		}
 		bannedTermStrings = bannedTermsToStrings(bannedTerms)
 	}
 	f := store.ListJobsFilter{
@@ -1193,7 +1197,7 @@ func (s *Server) handleAddBannedTerm(w http.ResponseWriter, r *http.Request) {
 
 	_, err := s.filterStore.CreateUserBannedTerm(r.Context(), userID, term)
 	if err != nil {
-		if strings.Contains(err.Error(), "already exists") {
+		if errors.Is(err, store.ErrDuplicateBannedTerm) {
 			// Duplicate: redirect silently so the UI remains usable.
 			http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
 			return
