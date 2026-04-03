@@ -43,6 +43,8 @@ type Job struct {
 	ExtractedSalary string
 	ResumeHTML      string
 	CoverHTML       string
+	ResumeMarkdown  string
+	CoverMarkdown   string
 	ResumePDF       string
 	CoverPDF        string
 	ErrorMsg        string

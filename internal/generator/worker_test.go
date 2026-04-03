@@ -14,13 +14,15 @@ import (
 // ─── mock Generator ───────────────────────────────────────────────────────────
 
 type mockGenerator struct {
+	resumeMD  string
 	resumeHTML string
+	coverMD   string
 	coverHTML  string
 	err        error
 }
 
-func (m *mockGenerator) Generate(_ context.Context, _ models.Job, _ string) (string, string, error) {
-	return m.resumeHTML, m.coverHTML, m.err
+func (m *mockGenerator) Generate(_ context.Context, _ models.Job, _ string) (string, string, string, string, error) {
+	return m.resumeMD, m.resumeHTML, m.coverMD, m.coverHTML, m.err
 }
 
 // ─── mock Converter ───────────────────────────────────────────────────────────
@@ -41,10 +43,10 @@ func (m *mockConverter) PDFFromHTML(_ context.Context, _ string, outputPath stri
 // ─── mock WorkerStore ─────────────────────────────────────────────────────────
 
 type mockWorkerStore struct {
-	mu         sync.Mutex
-	jobs       map[int64]*models.Job
-	updates    []statusUpdate
-	generated  []generatedUpdate
+	mu        sync.Mutex
+	jobs      map[int64]*models.Job
+	updates   []statusUpdate
+	generated []generatedUpdate
 }
 
 type statusUpdate struct {
@@ -53,11 +55,13 @@ type statusUpdate struct {
 }
 
 type generatedUpdate struct {
-	id         int64
-	resumeHTML string
-	coverHTML  string
-	resumePDF  string
-	coverPDF   string
+	id             int64
+	resumeHTML     string
+	coverHTML      string
+	resumeMarkdown string
+	coverMarkdown  string
+	resumePDF      string
+	coverPDF       string
 }
 
 func newMockWorkerStore(jobs ...*models.Job) *mockWorkerStore {
@@ -102,10 +106,10 @@ func (m *mockWorkerStore) UpdateJobStatus(_ context.Context, _ int64, id int64, 
 	return nil
 }
 
-func (m *mockWorkerStore) UpdateJobGenerated(_ context.Context, _ int64, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
+func (m *mockWorkerStore) UpdateJobGenerated(_ context.Context, _ int64, id int64, resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.generated = append(m.generated, generatedUpdate{id, resumeHTML, coverHTML, resumePDF, coverPDF})
+	m.generated = append(m.generated, generatedUpdate{id, resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF})
 	return nil
 }
 
@@ -132,7 +136,7 @@ func TestWorker_processApproved(t *testing.T) {
 
 	t.Run("happy path: generates and completes job", func(t *testing.T) {
 		ms := newMockWorkerStore(approvedJob)
-		gen := &mockGenerator{resumeHTML: "<h1>Resume</h1>", coverHTML: "<h1>Cover</h1>"}
+		gen := &mockGenerator{resumeMD: "# Resume", resumeHTML: "<h1>Resume</h1>", coverMD: "# Cover", coverHTML: "<h1>Cover</h1>"}
 		conv := &mockConverter{}
 
 		w := NewWorker(ms, gen, conv, t.TempDir(), "", 0, nil)
@@ -160,18 +164,73 @@ func TestWorker_processApproved(t *testing.T) {
 			t.Errorf("pdf converter calls = %d, want 2", len(conv.calls))
 		}
 
-		// UpdateJobGenerated should have been called.
+		// UpdateJobGenerated should have been called with HTML and Markdown.
 		if len(ms.generated) != 1 {
 			t.Fatalf("generated updates = %d, want 1", len(ms.generated))
 		}
 		if ms.generated[0].resumeHTML != "<h1>Resume</h1>" {
 			t.Errorf("resumeHTML = %q", ms.generated[0].resumeHTML)
 		}
+		if ms.generated[0].resumeMarkdown != "# Resume" {
+			t.Errorf("resumeMarkdown = %q", ms.generated[0].resumeMarkdown)
+		}
+		if ms.generated[0].coverMarkdown != "# Cover" {
+			t.Errorf("coverMarkdown = %q", ms.generated[0].coverMarkdown)
+		}
+	})
+
+	t.Run("nil converter: skips PDF, still completes job", func(t *testing.T) {
+		job2 := &models.Job{ID: 2, ExternalID: "def", Source: "serpapi", Title: "T", Company: "C", Status: models.StatusApproved}
+		ms := newMockWorkerStore(job2)
+		gen := &mockGenerator{resumeMD: "# Resume", resumeHTML: "<h1>Resume</h1>", coverMD: "# Cover", coverHTML: "<h1>Cover</h1>"}
+
+		w := NewWorker(ms, gen, nil, t.TempDir(), "", 0, nil)
+		w.processApproved(ctx)
+
+		lastStatus := ms.updates[len(ms.updates)-1].status
+		if lastStatus != models.StatusComplete {
+			t.Errorf("last status = %q, want complete", lastStatus)
+		}
+		if len(ms.generated) != 1 {
+			t.Fatalf("generated updates = %d, want 1", len(ms.generated))
+		}
+		// PDF paths should be empty since converter was nil.
+		if ms.generated[0].resumePDF != "" {
+			t.Errorf("resumePDF = %q, want empty (no converter)", ms.generated[0].resumePDF)
+		}
+		if ms.generated[0].coverPDF != "" {
+			t.Errorf("coverPDF = %q, want empty (no converter)", ms.generated[0].coverPDF)
+		}
+	})
+
+	t.Run("converter error is non-fatal: job still completes with empty pdf paths", func(t *testing.T) {
+		job3 := &models.Job{ID: 3, ExternalID: "ghi", Source: "serpapi", Title: "T", Company: "C", Status: models.StatusApproved}
+		ms := newMockWorkerStore(job3)
+		gen := &mockGenerator{resumeMD: "# Resume", resumeHTML: "<h1>Resume</h1>", coverMD: "# Cover", coverHTML: "<h1>Cover</h1>"}
+		conv := &mockConverter{err: errors.New("chromium unavailable")}
+
+		w := NewWorker(ms, gen, conv, t.TempDir(), "", 0, nil)
+		w.processApproved(ctx)
+
+		lastStatus := ms.updates[len(ms.updates)-1].status
+		if lastStatus != models.StatusComplete {
+			t.Errorf("last status = %q, want complete (pdf failure is non-fatal)", lastStatus)
+		}
+		if len(ms.generated) != 1 {
+			t.Fatalf("generated updates = %d, want 1", len(ms.generated))
+		}
+		// PDF paths should be empty after conversion failure.
+		if ms.generated[0].resumePDF != "" {
+			t.Errorf("resumePDF = %q, want empty after failed conversion", ms.generated[0].resumePDF)
+		}
+		if ms.generated[0].coverPDF != "" {
+			t.Errorf("coverPDF = %q, want empty after failed conversion", ms.generated[0].coverPDF)
+		}
 	})
 
 	t.Run("generator error sets status to failed", func(t *testing.T) {
-		job2 := &models.Job{ID: 2, ExternalID: "xyz", Source: "serpapi", Title: "T", Company: "C", Status: models.StatusApproved}
-		ms := newMockWorkerStore(job2)
+		job4 := &models.Job{ID: 4, ExternalID: "xyz", Source: "serpapi", Title: "T", Company: "C", Status: models.StatusApproved}
+		ms := newMockWorkerStore(job4)
 		gen := &mockGenerator{err: errors.New("api down")}
 		conv := &mockConverter{}
 
