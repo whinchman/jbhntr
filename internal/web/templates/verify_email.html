@@ -1,12 +1,47 @@
 {{define "verify_email.html"}}
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Verify Email</title></head>
-<body>
-<h1>Verify Your Email</h1>
-{{if .Flash}}<p class="success">{{.Flash}}</p>{{end}}
-{{if .FlashError}}<p class="error">{{.FlashError}}</p>{{end}}
-<p>A verification email has been sent to {{.Email}}. Please check your inbox.</p>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobHuntr — Verify Your Email</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-page">
+  <article class="login-card">
+    <header class="login-card-header">
+      <h1>JobHuntr</h1>
+      <p>Check your inbox</p>
+    </header>
+
+    {{if .Flash}}
+    <div class="alert alert-success" role="alert">{{.Flash}}</div>
+    {{end}}
+    {{if .FlashError}}
+    <div class="alert alert-danger" role="alert">{{.FlashError}}</div>
+    {{end}}
+
+    <div class="verify-email-body">
+      <p>We've sent a verification link to</p>
+      <p><strong>{{.Email}}</strong></p>
+      <p class="text-muted">Click the link in that email to activate your account. The link expires in 24 hours.</p>
+
+      <hr>
+
+      <p class="text-muted">Didn't get it? Check your spam folder, or:</p>
+
+      <form method="post" action="/resend-verification">
+        <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+        <button type="submit" class="outline">Resend verification email</button>
+      </form>
+    </div>
+
+    <footer class="login-card-footer">
+      <p>Wrong email? <a href="/register">Start over</a></p>
+      <p>Already verified? <a href="/login">Sign in</a></p>
+    </footer>
+  </article>
 </body>
 </html>
 {{end}}
