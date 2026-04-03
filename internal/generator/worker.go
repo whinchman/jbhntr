@@ -18,7 +18,7 @@ type WorkerStore interface {
 	GetJob(ctx context.Context, userID int64, id int64) (*models.Job, error)
 	ListJobs(ctx context.Context, userID int64, f store.ListJobsFilter) ([]models.Job, error)
 	UpdateJobStatus(ctx context.Context, userID int64, id int64, status models.JobStatus) error
-	UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error
+	UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF string) error
 	UpdateJobError(ctx context.Context, userID int64, id int64, errMsg string) error
 }
 
@@ -103,31 +103,32 @@ func (w *Worker) processJob(ctx context.Context, job models.Job) {
 		}
 	}
 
-	resumeHTML, coverHTML, err := w.generator.Generate(ctx, job, baseResume)
+	resumeMD, resumeHTML, coverMD, coverHTML, err := w.generator.Generate(ctx, job, baseResume)
 	if err != nil {
 		log.Error("generation failed", "error", err)
 		w.failJob(ctx, job.ID, err.Error())
 		return
 	}
 
-	jobDir := filepath.Join(w.outputDir, fmt.Sprintf("%d", job.ID))
-	resumePDF := filepath.Join(jobDir, "resume.pdf")
-	coverPDF := filepath.Join(jobDir, "cover_letter.pdf")
+	// PDF conversion is optional: if no converter is available, skip it gracefully.
+	resumePDF, coverPDF := "", ""
+	if w.converter != nil {
+		jobDir := filepath.Join(w.outputDir, fmt.Sprintf("%d", job.ID))
+		resumePDF = filepath.Join(jobDir, "resume.pdf")
+		coverPDF = filepath.Join(jobDir, "cover_letter.pdf")
 
-	if err := w.converter.PDFFromHTML(ctx, resumeHTML, resumePDF); err != nil {
-		log.Error("resume pdf conversion failed", "error", err)
-		w.failJob(ctx, job.ID, err.Error())
-		return
-	}
-
-	if err := w.converter.PDFFromHTML(ctx, coverHTML, coverPDF); err != nil {
-		log.Error("cover letter pdf conversion failed", "error", err)
-		w.failJob(ctx, job.ID, err.Error())
-		return
+		if err := w.converter.PDFFromHTML(ctx, resumeHTML, resumePDF); err != nil {
+			log.Warn("resume pdf conversion failed (non-fatal)", "error", err)
+			resumePDF = ""
+		}
+		if err := w.converter.PDFFromHTML(ctx, coverHTML, coverPDF); err != nil {
+			log.Warn("cover letter pdf conversion failed (non-fatal)", "error", err)
+			coverPDF = ""
+		}
 	}
 
 	// userID=0: worker processes jobs across all users (unscoped query).
-	if err := w.store.UpdateJobGenerated(ctx, 0, job.ID, resumeHTML, coverHTML, resumePDF, coverPDF); err != nil {
+	if err := w.store.UpdateJobGenerated(ctx, 0, job.ID, resumeHTML, coverHTML, resumeMD, coverMD, resumePDF, coverPDF); err != nil {
 		log.Error("failed to save generated paths", "error", err)
 		w.failJob(ctx, job.ID, err.Error())
 		return
