@@ -1,6 +1,6 @@
 {{define "job_rows"}}
 {{if not .}}
-<tr><td colspan="7" style="text-align:center;color:#999;">No jobs found.</td></tr>
+<tr><td colspan="7" class="job-table-empty">No jobs found.</td></tr>
 {{else}}
 {{range .}}
 <tr>
@@ -15,23 +15,23 @@
     <button hx-post="/api/jobs/{{.ID}}/approve"
             hx-target="closest tr"
             hx-swap="outerHTML"
-            class="outline contrast" style="padding:0.2em 0.6em;font-size:0.8em;">
+            class="outline contrast btn-sm">
       Approve
     </button>
     <button hx-post="/api/jobs/{{.ID}}/reject"
             hx-target="closest tr"
             hx-swap="outerHTML"
-            class="outline" style="padding:0.2em 0.6em;font-size:0.8em;">
+            class="outline btn-sm">
       Reject
     </button>
     {{else if eq .Status "complete"}}
-    <a href="/jobs/{{.ID}}" role="button" class="outline" style="padding:0.2em 0.6em;font-size:0.8em;">View</a>
+    <a href="/jobs/{{.ID}}" role="button" class="outline btn-sm">View</a>
     {{end}}
   </td>
 </tr>
 {{if .Summary}}
-<tr>
-  <td colspan="7" style="padding:0.2em 1em 0.8em;font-size:0.85em;color:#555;border-top:none;">
+<tr class="job-summary-row">
+  <td colspan="7">
     {{.Summary}}
   </td>
 </tr>

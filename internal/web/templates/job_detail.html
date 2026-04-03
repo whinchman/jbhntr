@@ -22,24 +22,22 @@
   &nbsp;
   <button hx-post="/api/jobs/{{.Job.ID}}/approve"
           hx-on::after-request="location.reload()"
-          class="outline contrast"
-          style="padding:0.3em 0.8em;">Approve</button>
+          class="outline contrast btn-sm">Approve</button>
   <button hx-post="/api/jobs/{{.Job.ID}}/reject"
           hx-on::after-request="location.reload()"
-          class="outline"
-          style="padding:0.3em 0.8em;">Reject</button>
+          class="outline btn-sm">Reject</button>
   {{end}}
 </div>
 
 {{if .Job.Description}}
 <h2>Description</h2>
-<pre style="white-space:pre-wrap;font-size:0.9em;background:#f9f9f9;padding:1rem;border-radius:0.3em;">{{.Job.Description}}</pre>
+<pre class="job-description">{{.Job.Description}}</pre>
 {{end}}
 
 {{if eq .Job.Status "complete"}}
 <hr>
 <h2>Generated Resume</h2>
-<div style="border:1px solid #ccc;border-radius:0.3em;padding:1rem;margin-bottom:0.5rem;overflow:auto;">
+<div class="document-preview">
   {{.ResumeHTML}}
 </div>
 <p>
@@ -49,7 +47,7 @@
 </p>
 
 <h2>Cover Letter</h2>
-<div style="border:1px solid #ccc;border-radius:0.3em;padding:1rem;margin-bottom:0.5rem;overflow:auto;">
+<div class="document-preview">
   {{.CoverHTML}}
 </div>
 <p>
