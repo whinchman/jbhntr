@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -83,6 +84,12 @@ type FilterStore interface {
 	UpdateUserNtfyTopic(ctx context.Context, userID int64, topic string) error
 }
 
+// EmailSender is the interface consumed by auth handlers to send email.
+// It is satisfied by *mailer.SMTPMailer and *mailer.NoopMailer.
+type EmailSender interface {
+	SendMail(ctx context.Context, to, subject, body string) error
+}
+
 // allStatuses lists job statuses shown as tabs in the dashboard.
 var allStatuses = []models.JobStatus{
 	models.StatusDiscovered, models.StatusNotified, models.StatusApproved,
@@ -97,13 +104,19 @@ type Server struct {
 	sessionStore   sessions.Store
 	oauthProviders map[string]*oauth2.Config
 	baseURL        string
+	mailer         EmailSender
+	rateLimiters   sync.Map // map[string]*rate.Limiter — keyed by IP
 
-	templates      *template.Template
-	detailTmpl     *template.Template
-	settingsTmpl   *template.Template
-	profileTmpl    *template.Template
-	onboardingTmpl *template.Template
-	loginTmpl      *template.Template
+	templates         *template.Template
+	detailTmpl        *template.Template
+	settingsTmpl      *template.Template
+	profileTmpl       *template.Template
+	onboardingTmpl    *template.Template
+	loginTmpl         *template.Template
+	registerTmpl      *template.Template
+	verifyEmailTmpl   *template.Template
+	forgotPasswordTmpl *template.Template
+	resetPasswordTmpl *template.Template
 
 	startTime    time.Time
 	lastScrapeFn func() time.Time // optional; returns last scrape time
@@ -142,19 +155,27 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		"templates/onboarding.html",
 	))
 	loginTmpl := template.Must(template.ParseFS(templateFS, "templates/login.html"))
+	registerTmpl := template.Must(template.ParseFS(templateFS, "templates/register.html"))
+	verifyEmailTmpl := template.Must(template.ParseFS(templateFS, "templates/verify_email.html"))
+	forgotPasswordTmpl := template.Must(template.ParseFS(templateFS, "templates/forgot_password.html"))
+	resetPasswordTmpl := template.Must(template.ParseFS(templateFS, "templates/reset_password.html"))
 
 	srv := &Server{
-		store:          st,
-		userStore:      us,
-		filterStore:    fs,
-		templates:      tmpl,
-		detailTmpl:     detail,
-		settingsTmpl:   settings,
-		profileTmpl:    profileTmpl,
-		onboardingTmpl: onboardingTmpl,
-		loginTmpl:      loginTmpl,
-		startTime:      time.Now(),
-		cfg:            cfg,
+		store:              st,
+		userStore:          us,
+		filterStore:        fs,
+		templates:          tmpl,
+		detailTmpl:         detail,
+		settingsTmpl:       settings,
+		profileTmpl:        profileTmpl,
+		onboardingTmpl:     onboardingTmpl,
+		loginTmpl:          loginTmpl,
+		registerTmpl:       registerTmpl,
+		verifyEmailTmpl:    verifyEmailTmpl,
+		forgotPasswordTmpl: forgotPasswordTmpl,
+		resetPasswordTmpl:  resetPasswordTmpl,
+		startTime:          time.Now(),
+		cfg:                cfg,
 	}
 
 	// Set up auth if session secret is configured and a user store is available.
@@ -168,7 +189,9 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 			Secure:   strings.HasPrefix(cfg.Server.BaseURL, "https"),
 		}
 		srv.sessionStore = sessStore
-		srv.oauthProviders = oauthProviders(cfg.Auth, cfg.Server.BaseURL)
+		if cfg.Auth.OAuth.Enabled {
+			srv.oauthProviders = oauthProviders(cfg.Auth, cfg.Server.BaseURL)
+		}
 		srv.baseURL = cfg.Server.BaseURL
 	} else if cfg != nil {
 		srv.baseURL = cfg.Server.BaseURL
@@ -181,6 +204,13 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 // time for the /health endpoint. Call this after NewServerWithConfig.
 func (s *Server) WithLastScrapeFn(fn func() time.Time) *Server {
 	s.lastScrapeFn = fn
+	return s
+}
+
+// WithMailer sets the email sender used by auth handlers (registration, password
+// reset, email verification). Call this after NewServerWithConfig.
+func (s *Server) WithMailer(m EmailSender) *Server {
+	s.mailer = m
 	return s
 }
 
@@ -231,6 +261,16 @@ func (s *Server) Handler() http.Handler {
 	if s.sessionStore != nil {
 		r.Get("/auth/{provider}", s.handleOAuthStart)
 		r.Get("/auth/{provider}/callback", s.handleOAuthCallback)
+
+		// Email/password auth routes.
+		r.Get("/register", s.handleRegisterGet)
+		r.Post("/register", s.handleRegisterPost)
+		r.Post("/login", s.handleLoginPost)
+		r.Get("/forgot-password", s.handleForgotPasswordGet)
+		r.Post("/forgot-password", s.handleForgotPasswordPost)
+		r.Get("/reset-password", s.handleResetPasswordGet)
+		r.Post("/reset-password", s.handleResetPasswordPost)
+		r.Get("/verify-email", s.handleVerifyEmail)
 	}
 
 	// Optional-auth routes — serve different content for logged-in vs. logged-out users.

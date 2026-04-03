@@ -1,0 +1,12 @@
+{{define "verify_email.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Verify Email</title></head>
+<body>
+<h1>Verify Your Email</h1>
+{{if .Flash}}<p class="success">{{.Flash}}</p>{{end}}
+{{if .FlashError}}<p class="error">{{.FlashError}}</p>{{end}}
+<p>A verification email has been sent to {{.Email}}. Please check your inbox.</p>
+</body>
+</html>
+{{end}}

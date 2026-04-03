@@ -1,0 +1,17 @@
+{{define "register.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Register</title></head>
+<body>
+<h1>Register</h1>
+{{if .Flash}}<p class="error">{{.Flash}}</p>{{end}}
+<form method="POST" action="/register">
+  <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+  <label>Display Name: <input type="text" name="display_name" value="{{.Form.DisplayName}}"></label><br>
+  <label>Email: <input type="email" name="email" value="{{.Form.Email}}"></label><br>
+  <label>Password: <input type="password" name="password"></label><br>
+  <button type="submit">Register</button>
+</form>
+</body>
+</html>
+{{end}}

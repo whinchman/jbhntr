@@ -208,9 +208,12 @@ func generateState() (string, error) {
 type loginData struct {
 	// Providers is the list of OAuth provider names that are configured and
 	// available for login (e.g. "google", "github").
-	Providers []string
+	Providers    []string
 	// Flash is a one-shot error or info message to display. Empty means no alert.
-	Flash string
+	Flash        string
+	FlashSuccess string
+	CSRFToken    string
+	Email        string // pre-fill email on validation error
 }
 
 // handleLogin renders the login page with OAuth provider buttons.

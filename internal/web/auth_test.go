@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/gorilla/sessions"
 
@@ -67,6 +68,54 @@ func (m *mockUserStore) UpdateUserDisplayName(_ context.Context, userID int64, d
 	return nil
 }
 
+func (m *mockUserStore) CreateUserWithPassword(_ context.Context, email, displayName, passwordHash, verifyToken string, verifyExpiresAt time.Time) (*models.User, error) {
+	u := &models.User{
+		ID:          int64(len(m.users) + 1),
+		Email:       email,
+		DisplayName: displayName,
+		Provider:    "email",
+	}
+	m.users[u.ID] = u
+	return u, nil
+}
+
+func (m *mockUserStore) GetUserByEmail(_ context.Context, email string) (*models.User, error) {
+	for _, u := range m.users {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return nil, fmt.Errorf("user with email %q not found", email)
+}
+
+func (m *mockUserStore) SetResetToken(_ context.Context, userID int64, token string, expiresAt time.Time) error {
+	if _, ok := m.users[userID]; !ok {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
+func (m *mockUserStore) ConsumeResetToken(_ context.Context, token string, newPasswordHash string) (*models.User, error) {
+	for _, u := range m.users {
+		return u, nil
+	}
+	return nil, fmt.Errorf("token not found")
+}
+
+func (m *mockUserStore) SetEmailVerifyToken(_ context.Context, userID int64, token string, expiresAt time.Time) error {
+	if _, ok := m.users[userID]; !ok {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
+func (m *mockUserStore) ConsumeVerifyToken(_ context.Context, token string) (*models.User, error) {
+	for _, u := range m.users {
+		return u, nil
+	}
+	return nil, fmt.Errorf("token not found")
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 func newAuthConfig() *config.Config {
@@ -77,6 +126,9 @@ func newAuthConfig() *config.Config {
 		},
 		Auth: config.AuthConfig{
 			SessionSecret: "test-secret-that-is-at-least-32-bytes",
+			OAuth: config.OAuthConfig{
+				Enabled: true,
+			},
 			Providers: config.ProvidersConfig{
 				Google: config.OAuthProviderConfig{
 					ClientID:     "google-client-id",
