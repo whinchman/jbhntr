@@ -122,6 +122,30 @@ if w.converter != nil {
 
 ## Notes
 
+### Code Review (2026-04-03)
+
+**Verdict: approve** — 0 critical, 1 warning, 2 info findings.
+
+#### Findings
+
+##### [WARNING] go.mod — godocx added as unused dependency
+
+`github.com/gomutex/godocx v0.1.5` (and its transitive deps `stretchr/testify`, `davecgh/go-spew`, `pmezard/go-difflib`) are added to `go.mod` / `go.sum` as `// indirect` but are not imported anywhere in source or test files. `go mod tidy` will strip them on the next toolchain run, which could cause a CI failure or a confusing diff. This dependency should only be added in the task that first imports it.
+
+**Fix:** Remove the four indirect entries from `go.mod` / `go.sum` and re-add `gomutex/godocx` (along with its real transitive deps) in the task that first uses it to generate DOCX output.
+
+##### [INFO] store.go — baseline schema omits new columns (expected, not a bug)
+
+The `schema` constant in `store.go` does not include `resume_markdown` / `cover_markdown`. These columns are added by migration 008. This is architecturally correct (migrations are additive), but means any fresh install that runs only the baseline `schema` without migrations would be missing the columns at runtime. Since `Open()` always runs `Migrate()` immediately after applying the baseline schema this is not a real problem — documenting for awareness.
+
+##### [INFO] generator.go — extractSection uses first-occurrence matching
+
+`extractSection` uses `strings.Index` which finds the first occurrence of each separator. If the LLM returns a section whose content contains a separator string verbatim (e.g. the generated HTML contains `---RESUME_MD---` as a literal string), parsing would silently truncate that section. The separator strings are distinctive enough that this is a low-probability edge case, not a code bug. Documenting for awareness.
+
+#### Summary
+
+All seven acceptance criteria are met. Migration is correct and idempotent. Column ordering in `scanJob` (22 destinations) exactly matches both SELECT column lists in `GetJob` and `ListJobs` (22 columns each). `UpdateJobGenerated` SQL parameters are in the correct order. `WorkerStore` interface in `worker.go` matches the store signature. Worker `processJob` correctly implements nil-safe PDF conversion with non-fatal error handling. `main.go` wraps `pdf.NewRodConverter()` as non-fatal. Generator four-section parsing is correct; the last section (coverHTML) is extracted using trailing-content logic rather than `extractSection` to avoid needing a closing sentinel. Tests cover the nil-converter, non-fatal-error, and generator-failure paths. The only filing-worthy issue is the unused `godocx` dependency.
+
 ### Implementation Summary (2026-04-03)
 
 Branch: `feature/resume-export-1-foundation`

@@ -8,6 +8,29 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-011: godocx added as unused indirect dependency — will be stripped by go mod tidy
+
+**Severity:** Warning
+**File:** `go.mod`, `go.sum`
+**Found by:** Code Reviewer agent (resume-export-1-foundation review)
+**Branch:** feature/resume-export-1-foundation
+
+### Description
+
+`github.com/gomutex/godocx v0.1.5` (and its transitive test deps `stretchr/testify v1.9.0`, `davecgh/go-spew v1.1.1`, `pmezard/go-difflib v1.0.0`) were added to `go.mod` / `go.sum` as `// indirect` entries in this task. No source or test file in the codebase imports these packages. Running `go mod tidy` will remove all four entries, causing a diff on the next toolchain run and potentially a CI failure if tidy is enforced.
+
+### Reproduction
+
+1. Ensure Go toolchain is available.
+2. Run `go mod tidy` on `feature/resume-export-1-foundation`.
+3. Observe that the four new entries are removed from `go.mod` and their corresponding lines removed from `go.sum`.
+
+### Fix
+
+Remove `github.com/gomutex/godocx`, `github.com/stretchr/testify`, `github.com/davecgh/go-spew`, and `github.com/pmezard/go-difflib` from `go.mod` and `go.sum` on this branch. Re-add `gomutex/godocx` (with `go get github.com/gomutex/godocx`) in the future task that first imports it for DOCX generation.
+
+---
+
 ## BUG-010: `.providers-section` used in login.html but not defined in app.css
 
 **Severity:** Low (minor visual spacing regression)
