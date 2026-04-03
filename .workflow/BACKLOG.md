@@ -11,4 +11,4 @@ items into tasks, then moves them to TODO.md.
 
 ## Features
 
-
+- [ ] Allow users to generate a Sankey flow diagram to visualize how their job search is going
