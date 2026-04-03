@@ -1,7 +1,8 @@
 # Task: modern-design-3-content-templates
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
+- **Review**: approve
 - **Repo**: . (root — single repo at /workspace)
 - **Parallel Group**: 2
 - **Branch**: feature/modern-design-3
@@ -188,4 +189,84 @@ that is not in `app.css`, surface it in the Notes section.
 
 ## Notes
 
-<!-- Implementing agent fills this in when complete -->
+All six content templates updated on branch `feature/modern-design-3` (worktree at `/workspace/worktrees/modern-design-3`).
+
+**Changes made per template:**
+
+- **dashboard.html**: Wrapped `<table>` in `<div class="job-table-wrapper">`, added `class="job-table"` to `<table>`, removed `style="cursor:pointer;user-select:none;"` from `<th>` elements (CSS rule `th[hx-get]` handles them), replaced unauthenticated hero `<section style="…">` with `<section class="hero">` and removed inline styles from child `<h1>` and `<p>`.
+- **job_detail.html**: Replaced `<pre style="…">` with `<pre class="job-description">`, replaced document preview `<div style="…">` with `<div class="document-preview">` (both resume and cover letter), added `class="btn-sm"` to Approve/Reject buttons and removed `style="padding:…"`.
+- **partials/job_rows.html**: Replaced empty-state `<td style="…">` with `<td class="job-table-empty">`, replaced summary row `<tr>` inline `<td style="…">` with `<tr class="job-summary-row">` and clean `<td>`, added `class="btn-sm"` to all action buttons (Approve, Reject, View) and removed `style` attributes.
+- **settings.html**: Flash alert replaced with `class="alert alert-success"`, muted paragraph with `class="text-muted"`, filter grid div with `class="filter-form-grid"`, Remove button with `class="btn-sm"`, NTFY hint `<small>` with `class="field-hint"`, removed `style="margin-top:0.75rem;"` from Save Notifications button, resume textarea with `class="mono"`.
+- **profile.html**: Success alert with `class="alert alert-success"`, danger/error alert with `class="alert alert-danger"`, display-name flex div with `class="inline-form"`, redundant `style` on inner label removed (covered by `.inline-form label`), avatar `<img>` with `class="avatar"`.
+- **onboarding.html**: Error div with `class="alert alert-danger"`, required asterisk `<span>` with `class="text-danger"`.
+
+**No inline `style=""` attributes remain in any of the six templates.** All HTMX attributes and Go template actions preserved exactly.
+
+**Tests**: `npm test` is not applicable (Go project, no Go binary available in container). Template syntax verified by visual inspection; no structural changes to Go template actions or HTMX wiring.
+
+**Commit**: `abf76e0` on `feature/modern-design-3`
+
+---
+
+## Code Review — modern-design-3-content-templates
+
+**Reviewer**: Code Reviewer agent
+**Date**: 2026-04-03
+**Branch**: `feature/modern-design-3` (commit `abf76e0`)
+**Verdict**: APPROVE — 0 critical, 0 warning, 2 info
+
+### Review Summary
+
+All six content templates were reviewed against the acceptance criteria, the full git diff, and the CSS classes defined in `app.css`.
+
+#### Correctness
+
+- All inline `style=""` attributes have been removed from all six templates. Confirmed by `grep -n 'style='` returning no output across all six files.
+- Every required CSS class mapping is correct and the class is defined in `app.css`:
+  - `.job-table`, `.job-table-wrapper`, `.hero`, `.tab-bar` (dashboard.html) — all present in app.css sections 5 and 6
+  - `.job-description`, `.document-preview`, `.btn-sm` (job_detail.html) — sections 8 and 14
+  - `.job-table-empty`, `.job-summary-row`, `.btn-sm` (job_rows.html) — section 6
+  - `.alert`, `.alert-success`, `.text-muted`, `.filter-form-grid`, `.btn-sm`, `.field-hint`, `.mono` (settings.html) — sections 7 and 10
+  - `.alert`, `.alert-success`, `.alert-danger`, `.inline-form`, `.avatar` (profile.html) — sections 10 and 13
+  - `.alert`, `.alert-danger`, `.text-danger` (onboarding.html) — sections 10 and 16
+
+- The `profile.html` `<label style="flex:1;margin-bottom:0;">` inline style was also correctly removed. The `.inline-form label` rule in app.css (`flex: 1; margin-bottom: 0`) covers these properties.
+
+- The `tab-bar` class was already present on `dashboard.html` before this task — verified via `git show development:dashboard.html`. No change was needed or made to it.
+
+- The `settings.html` `<small class="field-hint">` correctly applies to the NTFY topic hint. Note: `label small` is also covered by the same CSS rule block (`label small, .field-hint`), so using the class here is consistent.
+
+#### HTMX Preservation
+
+All HTMX attributes verified intact:
+- `hx-get`, `hx-target`, `hx-swap`, `hx-push-url`, `hx-trigger`, `hx-include`, `hx-vals` on dashboard.html polling div and tab links
+- `hx-post`, `hx-target`, `hx-swap` on job_rows.html action buttons (closest tr swap preserved)
+- `hx-post`, `hx-on::after-request` on job_detail.html buttons
+- `hx-post`, `hx-target`, `hx-push-url` on settings.html filter removal button
+- `hx-post`, `hx-push-url` on profile.html sign-out button
+
+#### Go Template Actions
+
+All `{{range}}`, `{{if}}`, `{{else}}`, `{{end}}`, `{{define}}`, `{{template}}`, `{{.}}` and field access expressions verified preserved exactly. No template action was altered, added, or dropped.
+
+#### Security
+
+No security issues. No new user-supplied content is rendered unescaped. CSRF hidden fields remain in all forms.
+
+#### Commit Hygiene
+
+The task's commit (`abf76e0`) touches only the six intended template files. The prior commit (`3cf5c42`) that modified `server.go` and `app.css` is from task modern-design-1-css-static and is correctly part of the branch history as a dependency — it was not modified by this task.
+
+### Findings
+
+#### [INFO] dashboard.html — `job-table-wrapper` nesting depth increased
+
+The `<table>` is now nested inside `<div class="job-table-wrapper">` which is itself inside the HTMX polling `<div>`. The polling div's `hx-target="#job-table-body"` still correctly targets `tbody#job-table-body` — the new wrapper does not interfere with HTMX targeting. No bug, just a structural note.
+
+#### [INFO] settings.html — `filter-form-grid` responsive breakpoints differ from original
+
+The original inline style used `grid-template-columns:1fr 1fr 1fr auto` as a fixed layout. The new `.filter-form-grid` class is mobile-responsive (1 col → 2 col → 4 col). This is a deliberate design improvement consistent with the design spec; it is not a regression.
+
+### Acceptance Criteria Check
+
+All acceptance criteria from the task file verified as met. No outstanding criteria unchecked.
