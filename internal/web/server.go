@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -204,6 +205,13 @@ func (s *Server) Handler() http.Handler {
 		)
 		r.Use(csrfMiddleware)
 	}
+
+	// Static file serving — serve templates/static/ at /static/*
+	staticFS, err := fs.Sub(templateFS, "templates/static")
+	if err != nil {
+		panic(err)
+	}
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	// Public routes — no auth required.
 	r.Get("/health", s.handleHealth)
