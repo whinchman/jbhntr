@@ -665,3 +665,45 @@ if errMsg := r.URL.Query().Get("error"); errMsg != "" {
 }
 ```
 
+
+---
+
+## [WARNING] analytics — internal/web/server.go:1650 — No nil guard for s.statsStore
+
+- **File:** `internal/web/server.go`, line 1650
+- **Severity:** warning
+- **Feature:** analytics
+- **Task:** analytics-3-code-review
+
+### Description
+
+`handleStats` calls `s.statsStore.GetUserJobStats(ctx, user.ID)` without first
+checking whether `s.statsStore` is nil. If a future test helper or server
+construction path omits calling `WithStatsStore`, this will panic at runtime
+with a nil pointer dereference.
+
+All current call sites wire the store correctly (`main.go` calls
+`.WithStatsStore(db)` and `stats_test.go` calls `.WithStatsStore(ss)`), so
+this is not a live bug but a defensive-coding gap.
+
+### Reproduction Steps
+
+1. Construct a `Server` using `NewServerWithConfig(...)` without calling
+   `WithStatsStore`.
+2. Register a session and make a `GET /stats` request as an authenticated user.
+3. The server will panic: `runtime error: invalid memory address or nil pointer dereference`
+   at `server.go:1650`.
+
+### Suggested Fix
+
+Add a nil guard at the start of `handleStats`:
+
+```go
+if s.statsStore == nil {
+    http.Error(w, "stats unavailable", http.StatusServiceUnavailable)
+    return
+}
+```
+
+Alternatively, set a no-op default implementation in `NewServerWithConfig` so
+`statsStore` is never nil after construction.
