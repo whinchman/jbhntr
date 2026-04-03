@@ -1,0 +1,48 @@
+{{template "layout.html" .}}
+{{define "title"}}JobHuntr — Stats{{end}}
+{{define "content"}}
+  <h1>Job Search Stats</h1>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-value">{{.Stats.TotalFound}}</span>
+      <span class="stat-label">Total Found</span>
+    </div>
+    <div class="stat-card stat-card--approved">
+      <span class="stat-value">{{.Stats.TotalApproved}}</span>
+      <span class="stat-label">Approved</span>
+    </div>
+    <div class="stat-card stat-card--rejected">
+      <span class="stat-value">{{.Stats.TotalRejected}}</span>
+      <span class="stat-label">Rejected</span>
+    </div>
+    <div class="stat-card stat-card--applied">
+      <span class="stat-value">{{.Stats.TotalApplied}}</span>
+      <span class="stat-label">Applied</span>
+    </div>
+    <div class="stat-card stat-card--interviewing">
+      <span class="stat-value">{{.Stats.TotalInterviewing}}</span>
+      <span class="stat-label">Interviewing</span>
+    </div>
+    <div class="stat-card stat-card--won">
+      <span class="stat-value">{{.Stats.TotalWon}}</span>
+      <span class="stat-label">Won</span>
+    </div>
+    <div class="stat-card stat-card--lost">
+      <span class="stat-value">{{.Stats.TotalLost}}</span>
+      <span class="stat-label">Lost</span>
+    </div>
+  </div>
+  <section class="stats-chart-section">
+    <h2>Jobs Found per Week (Last 12 Weeks)</h2>
+    <div class="bar-chart">
+      {{range .WeeklyTrend}}
+      <div class="bar-chart__col">
+        <span class="bar-chart__count">{{.Count}}</span>
+        <div class="bar-chart__bar"
+             style="height: calc({{.Count}} / {{$.MaxWeekly}} * 160px)"></div>
+        <span class="bar-chart__label">{{.WeekStart.Format "Jan 2"}}</span>
+      </div>
+      {{end}}
+    </div>
+  </section>
+{{end}}

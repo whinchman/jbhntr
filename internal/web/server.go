@@ -91,6 +91,12 @@ type FilterStore interface {
 	DeleteUserBannedTerm(ctx context.Context, userID int64, termID int64) error
 }
 
+// StatsStore is the subset of store.Store used by the stats handlers.
+type StatsStore interface {
+	GetUserJobStats(ctx context.Context, userID int64) (store.UserJobStats, error)
+	GetJobsPerWeek(ctx context.Context, userID int64, weeks int) ([]store.WeeklyJobCount, error)
+}
+
 // EmailSender is the interface consumed by auth handlers to send email.
 // It is satisfied by *mailer.SMTPMailer and *mailer.NoopMailer.
 type EmailSender interface {
@@ -113,6 +119,7 @@ type Server struct {
 	userStore      UserStore
 	filterStore    FilterStore
 	adminStore     admin.AdminStore
+	statsStore     StatsStore
 	sessionStore   sessions.Store
 	oauthProviders map[string]*oauth2.Config
 	baseURL        string
@@ -131,6 +138,7 @@ type Server struct {
 	resetPasswordTmpl  *template.Template
 	approvedJobsTmpl   *template.Template
 	rejectedJobsTmpl   *template.Template
+	statsTmpl          *template.Template
 
 	startTime      time.Time
 	lastScrapeFn   func() time.Time // optional; returns last scrape time
@@ -229,6 +237,10 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		"templates/rejected_jobs.html",
 		"templates/partials/job_rows.html",
 	))
+	statsTmpl := template.Must(template.New("layout.html").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html",
+		"templates/stats.html",
+	))
 
 	srv := &Server{
 		store:              st,
@@ -246,6 +258,7 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		resetPasswordTmpl:  resetPasswordTmpl,
 		approvedJobsTmpl:   approvedJobsTmpl,
 		rejectedJobsTmpl:   rejectedJobsTmpl,
+		statsTmpl:          statsTmpl,
 		startTime:          time.Now(),
 		cfg:                cfg,
 	}
@@ -298,6 +311,13 @@ func (s *Server) WithMailer(m EmailSender) *Server {
 // when both this store and cfg.Admin.Password are non-empty.
 func (s *Server) WithAdminStore(as admin.AdminStore) *Server {
 	s.adminStore = as
+	return s
+}
+
+// WithStatsStore sets the stats store used to power the /stats page.
+// Call this after NewServerWithConfig.
+func (s *Server) WithStatsStore(ss StatsStore) *Server {
+	s.statsStore = ss
 	return s
 }
 
@@ -402,6 +422,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/profile", s.handleProfileSave)
 
 		r.Post("/logout", s.handleLogout)
+
+		r.Get("/stats", s.handleStats)
 
 		r.Route("/api/jobs", func(r chi.Router) {
 			r.Get("/", s.handleListJobs)
@@ -1604,6 +1626,90 @@ func (s *Server) handleDownloadCoverDocx(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 	w.Header().Set("Content-Disposition", "attachment; filename=cover_letter.docx")
 	_, _ = w.Write(docxBytes)
+}
+
+// statsData is the template data for the /stats page.
+type statsData struct {
+	Stats       store.UserJobStats
+	WeeklyTrend []store.WeeklyJobCount
+	MaxWeekly   int
+	CSRFToken   string
+	User        *models.User
+}
+
+// handleStats renders the /stats page for an authenticated user.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	ctx := r.Context()
+
+	stats, err := s.statsStore.GetUserJobStats(ctx, user.ID)
+	if err != nil {
+		slog.Error("handleStats: get user job stats", "error", err, "user_id", user.ID)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	rawWeekly, err := s.statsStore.GetJobsPerWeek(ctx, user.ID, 12)
+	if err != nil {
+		slog.Error("handleStats: get jobs per week", "error", err, "user_id", user.ID)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Build a map from week-start (truncated to day) → count so we can backfill
+	// missing weeks.
+	weekMap := make(map[time.Time]int, len(rawWeekly))
+	for _, wc := range rawWeekly {
+		key := wc.WeekStart.Truncate(24 * time.Hour)
+		weekMap[key] = wc.Count
+	}
+
+	// Determine the Monday of the current week, then walk back 11 weeks so we
+	// always emit exactly 12 entries.
+	now := time.Now().UTC()
+	weekday := int(now.Weekday())
+	if weekday == 0 {
+		weekday = 7 // Sunday → 7 so Monday is always day 1
+	}
+	currentMonday := now.AddDate(0, 0, -(weekday - 1))
+	currentMonday = time.Date(currentMonday.Year(), currentMonday.Month(), currentMonday.Day(), 0, 0, 0, 0, time.UTC)
+	startMonday := currentMonday.AddDate(0, 0, -11*7)
+
+	weekly := make([]store.WeeklyJobCount, 0, 12)
+	maxWeekly := 0
+	for i := 0; i < 12; i++ {
+		ws := startMonday.AddDate(0, 0, i*7)
+		count := weekMap[ws]
+		weekly = append(weekly, store.WeeklyJobCount{WeekStart: ws, Count: count})
+		if count > maxWeekly {
+			maxWeekly = count
+		}
+	}
+	if maxWeekly == 0 {
+		maxWeekly = 1
+	}
+
+	csrfToken := ""
+	if s.sessionStore != nil {
+		csrfToken = csrf.Token(r)
+	}
+
+	data := statsData{
+		Stats:       stats,
+		WeeklyTrend: weekly,
+		MaxWeekly:   maxWeekly,
+		CSRFToken:   csrfToken,
+		User:        user,
+	}
+
+	if err := s.statsTmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+		slog.Error("handleStats: render template", "error", err)
+	}
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
