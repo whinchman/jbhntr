@@ -25,8 +25,9 @@ RUN useradd --system --no-create-home --uid 1001 appuser
 
 WORKDIR /app
 
-# Copy the compiled binary from the builder
+# Copy the compiled binary and config from the builder
 COPY --from=builder /app/jobhuntr /app/jobhuntr
+COPY config.yaml /app/config.yaml
 
 # Pre-create writable output directory owned by appuser
 RUN mkdir -p /app/output && chown appuser:appuser /app/output
