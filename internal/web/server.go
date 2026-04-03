@@ -66,6 +66,12 @@ type UserStore interface {
 	UpsertUser(ctx context.Context, user *models.User) (*models.User, error)
 	UpdateUserOnboarding(ctx context.Context, userID int64, displayName string, resume string) error
 	UpdateUserDisplayName(ctx context.Context, userID int64, displayName string) error
+	CreateUserWithPassword(ctx context.Context, email, displayName, passwordHash, verifyToken string, verifyExpiresAt time.Time) (*models.User, error)
+	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
+	SetResetToken(ctx context.Context, userID int64, token string, expiresAt time.Time) error
+	ConsumeResetToken(ctx context.Context, token string, newPasswordHash string) (*models.User, error)
+	SetEmailVerifyToken(ctx context.Context, userID int64, token string, expiresAt time.Time) error
+	ConsumeVerifyToken(ctx context.Context, token string) (*models.User, error)
 }
 
 // FilterStore is the subset of store.Store used by the settings handlers.

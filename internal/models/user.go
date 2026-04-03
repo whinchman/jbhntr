@@ -15,6 +15,15 @@ type User struct {
 	NtfyTopic         string
 	CreatedAt          time.Time
 	LastLoginAt        time.Time
+
+	// Email/password authentication fields.
+	// PasswordHash is nil for OAuth-only accounts.
+	PasswordHash         *string
+	EmailVerified        bool
+	EmailVerifyToken     *string
+	EmailVerifyExpiresAt *time.Time
+	ResetToken           *string
+	ResetExpiresAt       *time.Time
 }
 
 // UserSearchFilter represents a per-user job search query configuration
