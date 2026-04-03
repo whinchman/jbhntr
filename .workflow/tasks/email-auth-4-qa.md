@@ -1,7 +1,7 @@
 # Task: email-auth-4-qa
 
 - **Type**: qa
-- **Status**: pending
+- **Status**: done
 - **Repo**: .
 - **Parallel Group**: 4
 - **Branch**: feature/email-auth-4-qa
@@ -105,4 +105,59 @@ Run `go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.ou
 
 ## Notes
 
-<!-- QA agent fills in test results, coverage summary, any bugs found -->
+### QA Results — 2026-04-03
+
+**Branch**: `feature/email-auth-4-qa`
+**Base**: merged `feature/email-auth-3-handlers` + `feature/email-auth-3-templates` (conflict resolved: rich HTML email templates with `{{define}}` wrappers)
+
+#### Test Results
+
+`go test ./...` — 5 pre-existing failures (all present on base branches before QA), **0 new failures**.
+
+Pre-existing failures (all logged in BUGS.md):
+- `TestIntegration_SchedulerCreatesJobsForCorrectUser` — uses SQLite `:memory:` with Postgres store (pre-existing)
+- `TestIntegration_OAuthLoginFlow`, `TestIntegration_UserIsolation_Jobs`, `TestIntegration_PerUserSettings` — same SQLite/Postgres mismatch (pre-existing, BUG-021)
+- `TestQA_DocxResponseIsValidZip` — content assertion failure (pre-existing, pre-email-auth)
+
+**Bug fixes applied in QA branch:**
+- Fixed `TestRequireAuth_Unauthenticated` and `TestRequireAuth_DeletedUser`: were testing `GET /` (optionalAuth route) but expected redirect behavior. Changed to `GET /settings` (requireAuth route). Logged as BUG-020.
+
+#### New QA Tests Added (`internal/web/email_auth_qa_test.go`)
+
+14 test groups, all PASS:
+1. `TestEmailAuthRoutes_AllReachable` — all 8 email auth routes registered and reachable
+2. `TestRateLimit_LoginPost` — 6th POST /login on same IP → rate-limited (303 back to /login)
+3. `TestRateLimit_ForgotPasswordPost` — 6th POST /forgot-password → rate-limited
+4. `TestLoginPost_TimingEqualization` — unknown email path takes >= 200ms
+5. `TestVerifyEmail_TokenSingleUse` — second ConsumeVerifyToken call returns nil → /login redirect
+6. `TestResetPassword_TokenSingleUse` — second ConsumeResetToken call returns nil → /forgot-password
+7. `TestHandleResetPasswordGet` — missing/expired/valid token states all render correctly
+8. `TestTemplateRendering_AllTemplatesParse` — server constructs without panic (all 5 browser templates parse)
+9. `TestTemplateRendering_BrowserTemplatesExecute` — all 4 GET routes return text/html
+10. `TestTemplateRendering_EmailTemplatesExecute` — both email templates parse and execute with variables
+11. `TestOAuthGate_RoutesNotRegistered_WhenOAuthDisabled` — /auth/google returns 400 when OAuth disabled; email/password routes still accessible
+12. `TestNoopMailer_RegistrationSendsNoEmail` — server without mailer completes registration without panic
+13. `TestCSRF_PostWithoutToken_Returns403` — all 4 POST routes reject unauthenticated requests with 403
+14. `TestRegisterPost_SendsVerificationEmail` / `TestForgotPasswordPost_ResetEmailToCorrectAddress` / `TestRegisterPost_DuplicateEmail_ShowsCorrectFlash` / `TestLoginPost_OAuthOnlyUser_CannotLogin` / `TestMigration009_Idempotency`
+
+#### Coverage (email_auth_email.go, excluding pre-existing failing tests)
+
+| Function | Coverage |
+|---|---|
+| generateToken | 75% |
+| getLimiter | 100% |
+| rateLimit | 100% |
+| renderEmailBody | 75% |
+| handleRegisterGet | 66.7% |
+| handleRegisterPost | 70% |
+| handleLoginPost | 83.3% |
+| handleForgotPasswordGet | 66.7% |
+| handleForgotPasswordPost | 73.9% |
+| handleResetPasswordGet | 68.8% |
+| handleResetPasswordPost | 66.7% |
+| handleVerifyEmail | 90% |
+
+#### New Bugs Logged
+
+- BUG-020: TestRequireAuth tests checked wrong route (optionalAuth `/` instead of requireAuth `/settings`) — fixed in this branch
+- BUG-021: Integration tests use SQLite `:memory:` with Postgres store — pre-existing, logged

@@ -8,6 +8,27 @@ approved fixes to TODO.md (removing them from this file).
 
 ---
 
+## BUG-020: [email-auth] TestRequireAuth_Unauthenticated and TestRequireAuth_DeletedUser test wrong route
+
+- File: `internal/web/auth_test.go`, lines 210–235 and 617–649
+- Severity: warning (test bug — causes spurious test failures)
+- Branch: feature/email-auth-3-handlers
+- Description: Both tests call `GET /` and expect a `303 → /login` redirect. However `GET /` is registered under the `optionalAuth` middleware group and intentionally returns `200 OK` to unauthenticated visitors. The `requireAuth` behavior they are trying to test is only triggered on protected routes like `/settings` or `/jobs/{id}`. As a result both tests fail on every run even though the application is working correctly.
+- Reproduction: `go test ./internal/web/... -run TestRequireAuth_Unauthenticated`
+- Fix: Change the test URL from `/` to a `requireAuth` route such as `/settings`. Fixed in QA branch `feature/email-auth-4-qa` (commit 741aec8).
+
+---
+
+## BUG-021: [email-auth] TestIntegration_OAuthLoginFlow, TestIntegration_UserIsolation_Jobs, TestIntegration_PerUserSettings use SQLite `:memory:` DSN with a Postgres store
+
+- File: `internal/web/integration_test.go`, lines 238, 348, 469
+- Severity: warning (test bug — pre-existing, causes test failures without TEST_DATABASE_URL)
+- Description: Three integration tests call `store.Open(":memory:")` expecting SQLite in-memory behavior. The store implementation uses PostgreSQL via `pgx/v5` and cannot parse `:memory:` as a DSN. The error is: `store: ping db: cannot parse ':memory:': failed to parse as keyword/value`. These tests were likely written targeting a SQLite implementation that predates the current Postgres store.
+- Reproduction: `go test ./internal/web/... -run TestIntegration_OAuthLoginFlow`
+- Fix: Either provide a `TEST_DATABASE_URL` in CI and skip when unset, or rewrite these tests to use the mock store (like the other web tests do).
+
+---
+
 ## BUG-016: [email-auth] SMTPMailer sends HTML email with Content-Type: text/plain
 
 - File: `internal/mailer/mailer.go`, line 88
