@@ -19,3 +19,6 @@ Thumbs.db
 .vscode/
 .idea/
 .workflow/bugimgs
+.workflow
+.workflow/*
+CLAUDE.md
