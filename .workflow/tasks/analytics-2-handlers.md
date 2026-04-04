@@ -1,7 +1,7 @@
 # Task: analytics-2-handlers
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Parallel Group**: 2
 - **Branch**: feature/analytics-2-handlers
 - **Source Item**: analytics (plans/analytics.md)
@@ -145,3 +145,15 @@ no type assertion needed in `main.go`.
 
 ## Notes
 
+Implemented on branch `feature/analytics-2-handlers` (based on `feature/analytics-1-store`).
+
+### Changes made
+
+- `internal/web/server.go`: Added `StatsStore` interface, `statsStore StatsStore` field on `Server`, `statsTmpl *template.Template` field, `WithStatsStore(ss StatsStore) *Server` builder, `statsData` struct, `handleStats` handler with 12-week backfill logic and MaxWeekly guard, `GET /stats` route in `requireAuth` group, `statsTmpl` parsed in `NewServerWithConfig`.
+- `internal/web/templates/stats.html`: New template with 7-card stats grid and 12-bar pure-CSS bar chart section.
+- `internal/web/templates/layout.html`: Added `{{if .User}}<a href="/stats">Stats</a>{{end}}` nav link between Rejected and Settings.
+- `internal/web/templates/static/app.css`: Appended section 19 with `.stats-grid`, `.stat-card` (and 6 modifier variants), `.bar-chart`, `.bar-chart__col`, `.bar-chart__bar`, `.bar-chart__count`, `.bar-chart__label` rules.
+- `cmd/jobhuntr/main.go`: Added `.WithStatsStore(db)` call in server construction chain.
+- `internal/web/stats_test.go`: `TestHandleStats_Unauthenticated` (expects 303 → /login) and `TestHandleStats_Authenticated` (expects 200 + correct body content).
+
+Note: `go build ./...` and `go test ./...` could not be run in this environment (Go runtime not installed; project uses Docker). All acceptance criteria reviewed manually against the code — no compilation errors expected.
