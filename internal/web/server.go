@@ -353,14 +353,6 @@ func (s *Server) WithStatsStore(ss StatsStore) *Server {
 	return s
 }
 
-// WithDriveTokenStore sets the store used to persist encrypted Google Drive
-// OAuth tokens. When this is set and GoogleDrive.ClientID is configured,
-// the Drive OAuth routes are active.
-func (s *Server) WithDriveTokenStore(store DriveTokenStore) *Server {
-	s.driveTokenStore = store
-	return s
-}
-
 // WithTestOAuthProvider replaces an OAuth provider's configuration.
 // Intended for integration tests that need to point OAuth endpoints at a
 // mock server.
