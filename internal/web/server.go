@@ -224,6 +224,7 @@ func NewServerWithConfig(st JobStore, us UserStore, fs FilterStore, cfg *config.
 		"templates/layout.html",
 		"templates/dashboard.html",
 		"templates/partials/job_rows.html",
+		"templates/partials/job_cards.html",
 	))
 	detail := template.Must(template.New("layout.html").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html",
@@ -428,6 +429,7 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/", s.handleDashboard)
 		r.Get("/partials/job-table", s.handleJobTablePartial)
+		r.Get("/partials/job-cards", s.handleJobCardsPartial)
 		r.Get("/jobs/approved", s.handleApprovedJobs)
 		r.Get("/jobs/rejected", s.handleRejectedJobs)
 		r.Get("/partials/approved-job-table", s.handleApprovedJobTablePartial)
@@ -667,6 +669,45 @@ func (s *Server) handleJobTablePartial(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "job_rows", jobRowsData{Jobs: jobs, CSRFToken: csrf.Token(r)}); err != nil {
+		slog.Error("template render error", "error", err)
+	}
+}
+
+func (s *Server) handleJobCardsPartial(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		return
+	}
+	var bannedTermStrings []string
+	if s.filterStore != nil {
+		bannedTerms, err := s.filterStore.ListUserBannedTerms(r.Context(), user.ID)
+		if err != nil {
+			slog.Warn("failed to load banned terms", "error", err)
+		} else {
+			bannedTermStrings = bannedTermsToStrings(bannedTerms)
+		}
+	}
+	q := r.URL.Query()
+	sort, order := parseSortParams(q)
+	f := store.ListJobsFilter{
+		Status:          models.JobStatus(q.Get("status")),
+		ExcludeStatuses: []models.JobStatus{models.StatusRejected},
+		Search:          q.Get("q"),
+		Sort:            sort,
+		Order:           order,
+		BannedTerms:     bannedTermStrings,
+	}
+	jobs, err := s.store.ListJobs(r.Context(), user.ID, f)
+	if err != nil {
+		http.Error(w, "failed to list jobs", http.StatusInternalServerError)
+		return
+	}
+	if jobs == nil {
+		jobs = []models.Job{}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.templates.ExecuteTemplate(w, "job_cards", jobRowsData{Jobs: jobs, CSRFToken: csrf.Token(r)}); err != nil {
 		slog.Error("template render error", "error", err)
 	}
 }
@@ -1165,7 +1206,26 @@ func (s *Server) respondJobAction(w http.ResponseWriter, r *http.Request, job *m
 			jobs = []models.Job{}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := s.templates.ExecuteTemplate(w, "job_rows", jobRowsData{Jobs: jobs, CSRFToken: csrf.Token(r)}); err != nil {
+		data := jobRowsData{Jobs: jobs, CSRFToken: csrf.Token(r)}
+
+		if r.Header.Get("HX-Target") == "job-card-deck" {
+			f.ExcludeStatuses = []models.JobStatus{models.StatusRejected}
+			// Re-fetch jobs with exclude filter applied for card deck.
+			jobs, err = s.store.ListJobs(r.Context(), userID, f)
+			if err != nil {
+				http.Error(w, "failed to list jobs", http.StatusInternalServerError)
+				return
+			}
+			if jobs == nil {
+				jobs = []models.Job{}
+			}
+			data = jobRowsData{Jobs: jobs, CSRFToken: csrf.Token(r)}
+			if err := s.templates.ExecuteTemplate(w, "job_cards", data); err != nil {
+				slog.Error("template render error", "error", err)
+			}
+			return
+		}
+		if err := s.templates.ExecuteTemplate(w, "job_rows", data); err != nil {
 			slog.Error("template render error", "error", err)
 		}
 		return
