@@ -1,0 +1,126 @@
+{{define "job_cards"}}
+{{if not .Jobs}}
+<div class="job-card-empty" role="status">
+  <p aria-hidden="true" style="font-size:2rem;margin-bottom:var(--space-4)">🎉</p>
+  <h2 class="job-card-empty-title">All caught up!</h2>
+  <p class="job-card-empty-body">No jobs to review right now.<br>Check back later or adjust your search filters.</p>
+  <button class="outline"
+          hx-get="/partials/job-cards"
+          hx-target="#job-card-deck"
+          hx-swap="innerHTML">Refresh</button>
+</div>
+{{else}}
+<p class="job-card-counter">{{len .Jobs}} job{{if gt (len .Jobs) 1}}s{{end}} to review</p>
+<div class="job-card-stack">
+  {{/* Ghost card 2 — third job in list (aria-hidden, inert) */}}
+  {{if gt (len .Jobs) 2}}
+  {{with index .Jobs 2}}
+  <div class="job-card job-card-ghost-2" aria-hidden="true" inert>
+    <div class="job-card-header">
+      <h2 class="job-card-title">{{.Title}}</h2>
+      <p class="job-card-company">{{.Company}}</p>
+    </div>
+  </div>
+  {{end}}
+  {{end}}
+
+  {{/* Ghost card 1 — second job in list (aria-hidden, inert) */}}
+  {{if gt (len .Jobs) 1}}
+  {{with index .Jobs 1}}
+  <div class="job-card job-card-ghost-1" aria-hidden="true" inert>
+    <div class="job-card-header">
+      <h2 class="job-card-title">{{.Title}}</h2>
+      <p class="job-card-company">{{.Company}}</p>
+    </div>
+  </div>
+  {{end}}
+  {{end}}
+
+  {{/* Active card — first job in list */}}
+  {{with index .Jobs 0}}
+  <article class="job-card job-card-active"
+           role="article"
+           aria-label="Job 1 of {{len $.Jobs}}: {{.Title}} at {{.Company}}"
+           data-job-id="{{.ID}}"
+           tabindex="0">
+
+    {{/* Swipe overlay badges */}}
+    <span class="job-card-overlay job-card-overlay-approve" aria-hidden="true">✓ APPROVE</span>
+    <span class="job-card-overlay job-card-overlay-reject"  aria-hidden="true">✗ REJECT</span>
+
+    <div class="job-card-header">
+      <span class="status-badge status-{{.Status}}">{{.Status}}</span>
+      <h2 class="job-card-title">
+        <a href="/jobs/{{.ID}}" class="job-card-link">{{.Title}}</a>
+      </h2>
+      <p class="job-card-company">{{.Company}}</p>
+    </div>
+
+    <hr class="job-card-divider">
+
+    {{if .Location}}
+    <div class="job-card-meta">
+      <span class="job-card-meta-icon" aria-hidden="true">📍</span>
+      <span>{{.Location}}</span>
+    </div>
+    {{end}}
+
+    {{if .ExtractedSalary}}
+    <div class="job-card-meta">
+      <span class="job-card-meta-icon" aria-hidden="true">💰</span>
+      <span>{{.ExtractedSalary}}</span>
+    </div>
+    {{else if .Salary}}
+    <div class="job-card-meta">
+      <span class="job-card-meta-icon" aria-hidden="true">💰</span>
+      <span>{{.Salary}}</span>
+    </div>
+    {{end}}
+
+    <div class="job-card-meta">
+      <span class="job-card-meta-icon" aria-hidden="true">📅</span>
+      <span>{{.DiscoveredAt.Format "Jan 2, 2006"}}</span>
+    </div>
+
+    {{if .Summary}}
+    <hr class="job-card-divider">
+    <p class="job-card-summary" data-summary>{{.Summary}}</p>
+    <button type="button" class="job-card-link" data-expand-summary style="background:none;border:none;padding:0;cursor:pointer">
+      Show more
+    </button>
+    {{end}}
+
+  </article>
+  {{end}}
+</div>
+
+{{/* Action buttons — always-visible fallback, no JS required */}}
+{{with index .Jobs 0}}
+<div class="job-card-actions">
+  <form method="post"
+        action="/api/jobs/{{.ID}}/reject"
+        hx-post="/api/jobs/{{.ID}}/reject"
+        hx-target="#job-card-deck"
+        hx-swap="innerHTML"
+        data-action="reject">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{$.CSRFToken}}">
+    <button type="submit" class="job-card-btn job-card-btn-reject">
+      <span aria-hidden="true">✗</span> Reject
+    </button>
+  </form>
+  <form method="post"
+        action="/api/jobs/{{.ID}}/approve"
+        hx-post="/api/jobs/{{.ID}}/approve"
+        hx-target="#job-card-deck"
+        hx-swap="innerHTML"
+        data-action="approve">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{$.CSRFToken}}">
+    <button type="submit" class="job-card-btn job-card-btn-approve">
+      <span aria-hidden="true">✓</span> Approve
+    </button>
+  </form>
+</div>
+{{end}}
+
+{{end}}{{/* end if .Jobs */}}
+{{end}}{{/* end define "job_cards" */}}

@@ -75,7 +75,7 @@
      hx-trigger="every 30s"
      hx-target="#job-table-body"
      hx-swap="innerHTML">
-  <div class="job-table-wrapper">
+  <div class="job-table-wrapper job-table-desktop">
     <table class="job-table">
       <thead>
         <tr>
@@ -96,6 +96,19 @@
     </table>
   </div>
 </div>
+
+<section id="job-card-deck"
+         class="job-card-deck"
+         hx-get="/partials/job-cards"
+         hx-trigger="every 30s"
+         hx-target="#job-card-deck"
+         hx-swap="innerHTML"
+         aria-label="Job review cards"
+         aria-live="polite"
+         aria-atomic="false">
+  {{template "job_cards" .}}
+</section>
+
 {{else}}
 <section class="hero">
   <h1>Track your job search, automatically.</h1>
@@ -106,5 +119,8 @@
   </p>
   <a href="/login" role="button">Sign In to Get Started</a>
 </section>
+{{end}}
+{{block "scripts" .}}
+<script src="/static/swipe-cards.js" defer></script>
 {{end}}
 {{end}}
