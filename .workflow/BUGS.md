@@ -35,3 +35,37 @@ s.templates.ExecuteTemplate(w, "job_rows", ...)
 ```
 
 **Priority**: low — correct behavior, minor inefficiency.
+
+---
+
+## [INFO] `internal/web/templates/static/swipe-cards.js` — `commitCard` missing `card` argument to `submitAction`
+
+**Feature**: tinder-style-mobile
+**Task**: tinder-mobile-qa (JS static review)
+**Branch**: feature/tinder-mobile-frontend
+**Severity**: info (no functional impact in practice)
+
+**Description**:
+`commitCard(card, direction)` calls `submitAction(direction)` without passing `card`. `submitAction` then searches `document.getElementById('job-card-deck')` for `form[data-action="${direction}"]`. Since there is only one active card in the deck at a time and only the active card has `data-action` forms, the selector always finds the correct form. However, if the `#job-card-deck` element were absent from the DOM (e.g., after an unexpected HTMX swap), `submitAction` returns early silently (line 158: `if (!deck) return`) with no error feedback.
+
+**Impact**: None under normal usage. In degraded DOM states, the swipe submission would silently fail with no user feedback.
+
+**Suggested fix** (low priority): Pass `card` to `submitAction` and search within `card.closest('#job-card-deck')` rather than `document.getElementById`.
+
+---
+
+## [INFO] `internal/web/templates/static/swipe-cards.js` — `window.matchMedia` not guarded against undefined in `commitCard`
+
+**Feature**: tinder-style-mobile
+**Task**: tinder-mobile-qa (JS static review)
+**Branch**: feature/tinder-mobile-frontend
+**Severity**: info (very old browsers only)
+
+**Description**:
+Line 134: `var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;`
+
+`window.matchMedia` is undefined in very old browsers (IE 9 and below). If called in such a context, this throws `TypeError: window.matchMedia is not a function`, preventing the fly-off animation and form submission entirely.
+
+**Impact**: None for any target mobile browser. The feature is explicitly progressive-enhancement mobile-first. IE 9 is not a supported target.
+
+**Suggested fix**: Guard with `if (window.matchMedia && window.matchMedia('...').matches)`. Low priority.
