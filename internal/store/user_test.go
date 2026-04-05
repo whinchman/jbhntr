@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -519,4 +520,217 @@ func TestCreateUserFilter_SetsCreatedAt(t *testing.T) {
 	if filter.CreatedAt.Before(before) || filter.CreatedAt.After(after) {
 		t.Errorf("CreatedAt = %v, want between %v and %v", filter.CreatedAt, before, after)
 	}
+}
+
+// ─── GoogleDriveToken ─────────────────────────────────────────────────────
+
+func TestUpsertGetDeleteGoogleDriveToken(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("upsert inserts new token", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-insert", Email: "gdt-insert@test.com"})
+
+		err := s.UpsertGoogleDriveToken(ctx, user.ID, "encrypted-token-1")
+		if err != nil {
+			t.Fatalf("UpsertGoogleDriveToken error = %v", err)
+		}
+
+		got, err := s.GetGoogleDriveToken(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetGoogleDriveToken error = %v", err)
+		}
+		if got != "encrypted-token-1" {
+			t.Errorf("token = %q, want encrypted-token-1", got)
+		}
+	})
+
+	t.Run("upsert updates existing token", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-update", Email: "gdt-update@test.com"})
+
+		s.UpsertGoogleDriveToken(ctx, user.ID, "first-token")
+		err := s.UpsertGoogleDriveToken(ctx, user.ID, "second-token")
+		if err != nil {
+			t.Fatalf("UpsertGoogleDriveToken (update) error = %v", err)
+		}
+
+		got, err := s.GetGoogleDriveToken(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetGoogleDriveToken error = %v", err)
+		}
+		if got != "second-token" {
+			t.Errorf("token = %q, want second-token", got)
+		}
+	})
+
+	t.Run("get returns ErrNotFound when no row exists", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-notfound", Email: "gdt-notfound@test.com"})
+
+		_, err := s.GetGoogleDriveToken(ctx, user.ID)
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("GetGoogleDriveToken expected ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("delete removes existing token", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-delete", Email: "gdt-delete@test.com"})
+
+		s.UpsertGoogleDriveToken(ctx, user.ID, "to-be-deleted")
+		err := s.DeleteGoogleDriveToken(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("DeleteGoogleDriveToken error = %v", err)
+		}
+
+		_, err = s.GetGoogleDriveToken(ctx, user.ID)
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("GetGoogleDriveToken after delete expected ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("delete is no-op for non-existent token", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-del-noop", Email: "gdt-del-noop@test.com"})
+
+		err := s.DeleteGoogleDriveToken(ctx, user.ID)
+		if err != nil {
+			t.Errorf("DeleteGoogleDriveToken (no row) expected no error, got %v", err)
+		}
+	})
+
+	t.Run("token is isolated per user", func(t *testing.T) {
+		s := openTestStore(t)
+		u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-iso-a", Email: "gdt-iso-a@test.com"})
+		u2, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-iso-b", Email: "gdt-iso-b@test.com"})
+
+		s.UpsertGoogleDriveToken(ctx, u1.ID, "token-a")
+		s.UpsertGoogleDriveToken(ctx, u2.ID, "token-b")
+
+		got1, _ := s.GetGoogleDriveToken(ctx, u1.ID)
+		got2, _ := s.GetGoogleDriveToken(ctx, u2.ID)
+
+		if got1 != "token-a" {
+			t.Errorf("u1 token = %q, want token-a", got1)
+		}
+		if got2 != "token-b" {
+			t.Errorf("u2 token = %q, want token-b", got2)
+		}
+	})
+}
+
+// TestGoogleDriveToken_NonExistentUserID verifies that GetGoogleDriveToken
+// returns ErrNotFound for a userID that does not exist in the users table,
+// not a foreign-key error or panic.
+func TestGoogleDriveToken_NonExistentUserID(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	_, err := s.GetGoogleDriveToken(ctx, 99999)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetGoogleDriveToken(nonexistent userID) expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestUpsertGoogleDriveToken_OverwritePreservesUserIsolation verifies that
+// updating one user's token does not affect another user's token.
+func TestUpsertGoogleDriveToken_OverwritePreservesUserIsolation(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-iso2-a", Email: "iso2a@test.com"})
+	u2, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "gdt-iso2-b", Email: "iso2b@test.com"})
+
+	s.UpsertGoogleDriveToken(ctx, u1.ID, "u1-token-v1")
+	s.UpsertGoogleDriveToken(ctx, u2.ID, "u2-token-v1")
+
+	// Update u1's token.
+	s.UpsertGoogleDriveToken(ctx, u1.ID, "u1-token-v2")
+
+	got1, err := s.GetGoogleDriveToken(ctx, u1.ID)
+	if err != nil {
+		t.Fatalf("GetGoogleDriveToken u1: %v", err)
+	}
+	if got1 != "u1-token-v2" {
+		t.Errorf("u1 token = %q, want u1-token-v2", got1)
+	}
+
+	// u2's token must be unchanged.
+	got2, err := s.GetGoogleDriveToken(ctx, u2.ID)
+	if err != nil {
+		t.Fatalf("GetGoogleDriveToken u2: %v", err)
+	}
+	if got2 != "u2-token-v1" {
+		t.Errorf("u2 token = %q, want u2-token-v1 (should be unchanged)", got2)
+	}
+}
+
+// ─── UpdateUserNtfyTopic ───────────────────────────────────────────────────
+
+func TestUpdateUserNtfyTopic(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("sets ntfy_topic for existing user", func(t *testing.T) {
+		s := openTestStore(t)
+		user, err := s.UpsertUser(ctx, &models.User{
+			Provider:   "google",
+			ProviderID: "ntfy-update",
+			Email:      "ntfy@example.com",
+		})
+		if err != nil {
+			t.Fatalf("UpsertUser error = %v", err)
+		}
+
+		if err := s.UpdateUserNtfyTopic(ctx, user.ID, "my-jobs-topic"); err != nil {
+			t.Fatalf("UpdateUserNtfyTopic error = %v", err)
+		}
+
+		got, err := s.GetUser(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetUser error = %v", err)
+		}
+		if got.NtfyTopic != "my-jobs-topic" {
+			t.Errorf("NtfyTopic = %q, want my-jobs-topic", got.NtfyTopic)
+		}
+	})
+
+	t.Run("clears ntfy_topic when set to empty string", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "ntfy-clear", Email: "nc@example.com"})
+
+		s.UpdateUserNtfyTopic(ctx, user.ID, "some-topic")
+		if err := s.UpdateUserNtfyTopic(ctx, user.ID, ""); err != nil {
+			t.Fatalf("UpdateUserNtfyTopic(empty) error = %v", err)
+		}
+
+		got, err := s.GetUser(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetUser error = %v", err)
+		}
+		if got.NtfyTopic != "" {
+			t.Errorf("NtfyTopic = %q, want empty string after clear", got.NtfyTopic)
+		}
+	})
+
+	t.Run("returns error for non-existent user", func(t *testing.T) {
+		s := openTestStore(t)
+		err := s.UpdateUserNtfyTopic(ctx, 99999, "topic")
+		if err == nil {
+			t.Error("UpdateUserNtfyTopic(nonexistent) expected error, got nil")
+		}
+	})
+
+	t.Run("new user has empty ntfy_topic by default", func(t *testing.T) {
+		s := openTestStore(t)
+		user, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "ntfy-default", Email: "nd@example.com"})
+
+		got, err := s.GetUser(ctx, user.ID)
+		if err != nil {
+			t.Fatalf("GetUser error = %v", err)
+		}
+		if got.NtfyTopic != "" {
+			t.Errorf("NtfyTopic = %q, want empty string for new user", got.NtfyTopic)
+		}
+	})
 }

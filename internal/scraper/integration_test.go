@@ -52,7 +52,7 @@ func TestIntegration_SchedulerCreatesJobsForCorrectUser(t *testing.T) {
 		},
 	}
 
-	sched := NewScheduler(src, db, db, time.Hour, nil)
+	sched := NewScheduler([]Source{src}, db, db, time.Hour, nil)
 
 	newJobs, err := sched.RunOnce(ctx)
 	if err != nil {

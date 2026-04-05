@@ -19,43 +19,97 @@
 <div id="status-section">
   <span class="status-badge status-{{.Job.Status}}">{{.Job.Status}}</span>
   {{if or (eq .Job.Status "discovered") (eq .Job.Status "notified")}}
-  &nbsp;
-  <button hx-post="/api/jobs/{{.Job.ID}}/approve"
-          hx-on::after-request="location.reload()"
-          class="outline contrast"
-          style="padding:0.3em 0.8em;">Approve</button>
-  <button hx-post="/api/jobs/{{.Job.ID}}/reject"
-          hx-on::after-request="location.reload()"
-          class="outline"
-          style="padding:0.3em 0.8em;">Reject</button>
+  <div class="job-action-group" style="display:inline-flex; margin-left:0.5rem;">
+    <form method="post"
+          action="/api/jobs/{{.Job.ID}}/approve"
+          hx-post="/api/jobs/{{.Job.ID}}/approve"
+          hx-on::after-request="location.reload()">
+      <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+      <button type="submit" class="outline contrast btn-sm">Approve</button>
+    </form>
+    <form method="post"
+          action="/api/jobs/{{.Job.ID}}/reject"
+          hx-post="/api/jobs/{{.Job.ID}}/reject"
+          hx-on::after-request="location.reload()">
+      <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+      <button type="submit" class="outline btn-sm">Reject</button>
+    </form>
+  </div>
+  {{end}}
+  {{if eq .Job.Status "failed"}}
+  <div class="job-action-group" style="display:inline-flex; margin-left:0.5rem;">
+    <form method="post"
+          action="/api/jobs/{{.Job.ID}}/retry"
+          hx-post="/api/jobs/{{.Job.ID}}/retry"
+          hx-on::after-request="location.reload()">
+      <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+      <button type="submit" class="outline contrast btn-sm">Retry</button>
+    </form>
+  </div>
+  {{if .Job.ErrorMsg}}
+  <p class="error-msg"><strong>Error:</strong> {{.Job.ErrorMsg}}</p>
+  {{end}}
   {{end}}
 </div>
 
 {{if .Job.Description}}
 <h2>Description</h2>
-<pre style="white-space:pre-wrap;font-size:0.9em;background:#f9f9f9;padding:1rem;border-radius:0.3em;">{{.Job.Description}}</pre>
+<pre class="job-description">{{.Job.Description}}</pre>
 {{end}}
 
 {{if eq .Job.Status "complete"}}
 <hr>
 <h2>Generated Resume</h2>
-<div style="border:1px solid #ccc;border-radius:0.3em;padding:1rem;margin-bottom:0.5rem;overflow:auto;">
+<div class="document-preview">
   {{.ResumeHTML}}
 </div>
+{{if .Job.ResumeMarkdown}}
 <p>
-  <a href="/output/{{.Job.ID}}/resume.pdf" download="resume.pdf" role="button" class="outline">
-    Download Resume PDF
-  </a>
-</p>
-
-<h2>Cover Letter</h2>
-<div style="border:1px solid #ccc;border-radius:0.3em;padding:1rem;margin-bottom:0.5rem;overflow:auto;">
-  {{.CoverHTML}}
-</div>
-<p>
-  <a href="/output/{{.Job.ID}}/cover_letter.pdf" download="cover_letter.pdf" role="button" class="outline">
-    Download Cover Letter PDF
-  </a>
+  <a href="/output/{{.Job.ID}}/resume.md" download="resume.md" role="button" class="outline secondary">Download Markdown</a>
+  <a href="/output/{{.Job.ID}}/resume.docx" download="resume.docx" role="button" class="outline secondary">Download DOCX</a>
+  {{if .Job.ResumePDF}}
+  <a href="/output/{{.Job.ID}}/resume.pdf" download="resume.pdf" role="button" class="outline">Download PDF</a>
+  {{end}}
+  {{if and .GoogleDriveEnabled (eq .Job.Status "complete") .Job.ResumeMarkdown}}
+  <a href="/output/{{.Job.ID}}/resume.gdoc"
+     role="button" class="outline"
+     id="btn-resume-gdoc"
+     hx-get="/output/{{.Job.ID}}/resume.gdoc"
+     hx-on::after-request="openGdocIfOk(event)"
+     target="_self">Send to Google Docs</a>
+  {{end}}
 </p>
 {{end}}
+
+<h2>Cover Letter</h2>
+<div class="document-preview">
+  {{.CoverHTML}}
+</div>
+{{if .Job.CoverMarkdown}}
+<p>
+  <a href="/output/{{.Job.ID}}/cover_letter.md" download="cover_letter.md" role="button" class="outline secondary">Download Markdown</a>
+  <a href="/output/{{.Job.ID}}/cover_letter.docx" download="cover_letter.docx" role="button" class="outline secondary">Download DOCX</a>
+  {{if .Job.CoverPDF}}
+  <a href="/output/{{.Job.ID}}/cover_letter.pdf" download="cover_letter.pdf" role="button" class="outline">Download PDF</a>
+  {{end}}
+  {{if and .GoogleDriveEnabled (eq .Job.Status "complete") .Job.CoverMarkdown}}
+  <a href="/output/{{.Job.ID}}/cover_letter.gdoc"
+     role="button" class="outline"
+     id="btn-cover-gdoc"
+     hx-get="/output/{{.Job.ID}}/cover_letter.gdoc"
+     hx-on::after-request="openGdocIfOk(event)"
+     target="_self">Send to Google Docs</a>
+  {{end}}
+</p>
+{{end}}
+{{end}}
+
+<script>
+function openGdocIfOk(evt) {
+  if (evt.detail.successful) {
+    const data = JSON.parse(evt.detail.xhr.responseText);
+    if (data.url) window.open(data.url, '_blank');
+  }
+}
+</script>
 {{end}}

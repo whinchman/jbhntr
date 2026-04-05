@@ -58,6 +58,9 @@ type serpAPIApply struct {
 	Link string `json:"link"`
 }
 
+// Name returns the source identifier for SerpAPI.
+func (s *SerpAPISource) Name() string { return "serpapi" }
+
 // Search queries SerpAPI for jobs matching filter and returns discovered jobs.
 func (s *SerpAPISource) Search(ctx context.Context, filter models.SearchFilter) ([]models.Job, error) {
 	if err := s.limiter.Wait(ctx); err != nil {

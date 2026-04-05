@@ -7,23 +7,32 @@
 <h1>Job Listings</h1>
 
 <div class="tab-bar">
-  {{range $status := .Statuses}}
-  <a href="?status={{$status}}" role="button"
-     class="{{if eq $status $.ActiveStatus}}contrast{{else}}outline{{end}}"
-     hx-get="/partials/job-table?status={{$status}}"
-     hx-target="#job-table-body"
-     hx-swap="innerHTML"
-     hx-push-url="true">
-    {{$status}}
-  </a>
-  {{end}}
   <a href="/" role="button"
      class="{{if eq $.ActiveStatus ""}}contrast{{else}}outline{{end}}"
      hx-get="/partials/job-table"
      hx-target="#job-table-body"
      hx-swap="innerHTML"
-     hx-push-url="true">
+     hx-push-url="true"
+     hx-on:click="document.querySelectorAll('.tab-bar [role=button]').forEach(function(b){b.classList.remove('contrast');b.classList.add('outline')});this.classList.remove('outline');this.classList.add('contrast')">
     all
+  </a>
+  <a href="?status=discovered" role="button"
+     class="{{if eq $.ActiveStatus "discovered"}}contrast{{else}}outline{{end}}"
+     hx-get="/partials/job-table?status=discovered"
+     hx-target="#job-table-body"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-on:click="document.querySelectorAll('.tab-bar [role=button]').forEach(function(b){b.classList.remove('contrast');b.classList.add('outline')});this.classList.remove('outline');this.classList.add('contrast')">
+    discovered
+  </a>
+  <a href="?status=notified" role="button"
+     class="{{if eq $.ActiveStatus "notified"}}contrast{{else}}outline{{end}}"
+     hx-get="/partials/job-table?status=notified"
+     hx-target="#job-table-body"
+     hx-swap="innerHTML"
+     hx-push-url="true"
+     hx-on:click="document.querySelectorAll('.tab-bar [role=button]').forEach(function(b){b.classList.remove('contrast');b.classList.add('outline')});this.classList.remove('outline');this.classList.add('contrast')">
+    notified
   </a>
 </div>
 
@@ -36,35 +45,61 @@
        hx-include="[name='q']"
        value="{{.Search}}">
 
+{{if .NextScrapeAt.IsZero}}
+<p class="scrape-countdown">Scrape running soon…</p>
+{{else}}
+<p class="scrape-countdown" data-next-scrape="{{.NextScrapeAt.UTC.Format "2006-01-02T15:04:05Z"}}">
+  Next scrape in <span id="scrape-timer">…</span>
+</p>
+<script>
+(function() {
+  var el = document.querySelector('[data-next-scrape]');
+  if (!el) return;
+  var target = new Date(el.getAttribute('data-next-scrape'));
+  var span = document.getElementById('scrape-timer');
+  function tick() {
+    var diff = Math.max(0, Math.round((target - Date.now()) / 1000));
+    if (diff === 0) { span.textContent = 'any moment now'; return; }
+    var m = Math.floor(diff / 60);
+    var s = diff % 60;
+    span.textContent = (m > 0 ? m + 'm ' : '') + s + 's';
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
+{{end}}
+
 <div hx-get="/partials/job-table"
      hx-vals="js:{status: new URLSearchParams(location.search).get('status') || '', q: new URLSearchParams(location.search).get('q') || '', sort: new URLSearchParams(location.search).get('sort') || '', order: new URLSearchParams(location.search).get('order') || ''}"
      hx-trigger="every 30s"
      hx-target="#job-table-body"
      hx-swap="innerHTML">
-  <table>
-    <thead>
-      <tr>
-        {{- $base := printf "status=%s&q=%s" .ActiveStatus .Search -}}
-        {{- range .Columns -}}
-        <th style="cursor:pointer;user-select:none;"
-            hx-get="/partials/job-table?{{$base}}&sort={{.Key}}&order={{.NextOrder}}"
-            hx-target="#job-table-body"
-            hx-swap="innerHTML">
-          {{.Label}}{{if .Arrow}} {{.Arrow}}{{end}}
-        </th>
-        {{- end -}}
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="job-table-body">
-      {{template "job_rows" .Jobs}}
-    </tbody>
-  </table>
+  <div class="job-table-wrapper">
+    <table class="job-table">
+      <thead>
+        <tr>
+          {{- $base := printf "status=%s&q=%s" .ActiveStatus .Search -}}
+          {{- range .Columns -}}
+          <th hx-get="/partials/job-table?{{$base}}&sort={{.Key}}&order={{.NextOrder}}"
+              hx-target="#job-table-body"
+              hx-swap="innerHTML">
+            {{.Label}}{{if .Arrow}} {{.Arrow}}{{end}}
+          </th>
+          {{- end -}}
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="job-table-body">
+        {{template "job_rows" .}}
+      </tbody>
+    </table>
+  </div>
 </div>
 {{else}}
-<section style="text-align:center;padding:4rem 1rem;">
+<section class="hero">
   <h1>Track your job search, automatically.</h1>
-  <p style="max-width:40rem;margin:1rem auto;font-size:1.1rem;">
+  <p>
     JobHuntr discovers relevant job listings and automatically generates
     tailored resumes and cover letters — so you can focus on the
     interviews, not the applications.

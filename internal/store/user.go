@@ -7,8 +7,27 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/whinchman/jobhuntr/internal/models"
 )
+
+// ErrEmailTaken is returned by CreateUserWithPassword when the email address
+// is already registered.
+var ErrEmailTaken = errors.New("store: email already taken")
+
+// ErrDuplicateBannedTerm is returned by CreateUserBannedTerm when the user
+// already has the given term in their banned-keywords list.
+var ErrDuplicateBannedTerm = errors.New("store: banned term already exists for user")
+
+// ErrNotFound is returned when a requested record does not exist.
+var ErrNotFound = errors.New("store: not found")
+
+// userSelectCols is the canonical column list used in every SELECT on users.
+// It must stay in sync with scanUser.
+const userSelectCols = `id, provider, provider_id, email, display_name, avatar_url,
+       resume_markdown, onboarding_complete, ntfy_topic, created_at, last_login_at,
+       password_hash, email_verified, email_verify_token, email_verify_expires_at,
+       reset_token, reset_expires_at, banned_at`
 
 // ListActiveUserIDs returns the IDs of all users that have at least one
 // search filter configured. These are the users the scheduler should scrape
@@ -62,10 +81,8 @@ func (s *Store) UpsertUser(ctx context.Context, user *models.User) (*models.User
 
 // GetUser retrieves a user by primary key. Returns an error if not found.
 func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, provider, provider_id, email, display_name, avatar_url,
-		       resume_markdown, onboarding_complete, created_at, last_login_at
-		FROM users WHERE id = $1`, id)
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE id = $1", id)
 
 	u, err := scanUser(row)
 	if err != nil {
@@ -80,10 +97,9 @@ func (s *Store) GetUser(ctx context.Context, id int64) (*models.User, error) {
 // GetUserByProvider retrieves a user by provider name and provider-specific
 // ID. Returns an error if not found.
 func (s *Store) GetUserByProvider(ctx context.Context, provider, providerID string) (*models.User, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, provider, provider_id, email, display_name, avatar_url,
-		       resume_markdown, onboarding_complete, created_at, last_login_at
-		FROM users WHERE provider = $1 AND provider_id = $2`, provider, providerID)
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE provider = $1 AND provider_id = $2",
+		provider, providerID)
 
 	u, err := scanUser(row)
 	if err != nil {
@@ -91,6 +107,127 @@ func (s *Store) GetUserByProvider(ctx context.Context, provider, providerID stri
 			return nil, fmt.Errorf("store: user %s/%s not found", provider, providerID)
 		}
 		return nil, fmt.Errorf("store: get user by provider: %w", err)
+	}
+	return u, nil
+}
+
+// GetUserByEmail retrieves a user by email address. Returns nil, nil (no
+// error) when not found so callers can time-equalize before responding.
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE email = $1", email)
+
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: get user by email: %w", err)
+	}
+	return u, nil
+}
+
+// CreateUserWithPassword inserts a new email/password user with
+// email_verified=0 and the supplied verification token. Returns ErrEmailTaken
+// if the email address is already registered.
+func (s *Store) CreateUserWithPassword(ctx context.Context, email, displayName, passwordHash, verifyToken string, verifyExpiresAt time.Time) (*models.User, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO users
+		  (provider, provider_id, email, display_name, avatar_url, resume_markdown,
+		   onboarding_complete, last_login_at,
+		   password_hash, email_verified, email_verify_token, email_verify_expires_at)
+		VALUES ('email', '', $1, $2, '', '', 0, $3, $4, 0, $5, $6)
+		RETURNING id`,
+		email, displayName, now,
+		passwordHash, verifyToken, verifyExpiresAt.UTC().Format(time.RFC3339),
+	).Scan(&id)
+	if err != nil {
+		// Unique constraint violation on email.
+		if isUniqueViolation(err) {
+			return nil, ErrEmailTaken
+		}
+		return nil, fmt.Errorf("store: create user with password: %w", err)
+	}
+
+	return s.GetUser(ctx, id)
+}
+
+// SetResetToken stores a password-reset token for the given user.
+func (s *Store) SetResetToken(ctx context.Context, userID int64, token string, expiresAt time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET reset_token = $2, reset_expires_at = $3 WHERE id = $1",
+		userID, token, expiresAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("store: set reset token: %w", err)
+	}
+	return nil
+}
+
+// ConsumeResetToken atomically validates the token, updates the password hash,
+// and clears the token. Returns nil, nil if the token is not found or expired.
+func (s *Store) ConsumeResetToken(ctx context.Context, token string, newPasswordHash string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"UPDATE users SET password_hash = $2, reset_token = NULL, reset_expires_at = NULL WHERE reset_token = $1 AND reset_expires_at > NOW() RETURNING "+userSelectCols,
+		token, newPasswordHash,
+	)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: consume reset token: %w", err)
+	}
+	return u, nil
+}
+
+// SetEmailVerifyToken stores an email verification token for the given user.
+func (s *Store) SetEmailVerifyToken(ctx context.Context, userID int64, token string, expiresAt time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET email_verify_token = $2, email_verify_expires_at = $3 WHERE id = $1",
+		userID, token, expiresAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("store: set email verify token: %w", err)
+	}
+	return nil
+}
+
+// ConsumeVerifyToken atomically validates the token, marks the email as
+// verified, and clears the token. Returns nil, nil if the token is not found
+// or expired.
+func (s *Store) ConsumeVerifyToken(ctx context.Context, token string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"UPDATE users SET email_verified = 1, email_verify_token = NULL, email_verify_expires_at = NULL WHERE email_verify_token = $1 AND email_verify_expires_at > NOW() RETURNING "+userSelectCols,
+		token,
+	)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: consume verify token: %w", err)
+	}
+	return u, nil
+}
+
+// GetUserByResetToken retrieves a user whose reset_token matches and whose
+// reset_expires_at is in the future. Returns nil, nil when not found or expired.
+// This method does NOT consume (clear) the token.
+func (s *Store) GetUserByResetToken(ctx context.Context, token string) (*models.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userSelectCols+" FROM users WHERE reset_token = $1 AND reset_expires_at > NOW()",
+		token,
+	)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: get user by reset token: %w", err)
 	}
 	return u, nil
 }
@@ -219,26 +356,87 @@ func (s *Store) UpdateUserDisplayName(ctx context.Context, userID int64, display
 	return nil
 }
 
+// UpdateUserNtfyTopic updates the ntfy_topic column for the given user.
+func (s *Store) UpdateUserNtfyTopic(ctx context.Context, userID int64, topic string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE users SET ntfy_topic = $1 WHERE id = $2",
+		topic, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update user ntfy topic: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: update user ntfy topic rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: user %d not found", userID)
+	}
+	return nil
+}
+
 // scanUser scans a single user row into a models.User.
+// Column order must match userSelectCols exactly.
 func scanUser(s scanner) (*models.User, error) {
 	var u models.User
 	var createdAt, lastLoginAt string
-	var onboardingComplete int
+	var onboardingComplete, emailVerified int
+	var passwordHash sql.NullString
+	var emailVerifyToken sql.NullString
+	var emailVerifyExpiresAt sql.NullString
+	var resetToken sql.NullString
+	var resetExpiresAt sql.NullString
+	var bannedAt sql.NullString
+
 	err := s.Scan(
 		&u.ID, &u.Provider, &u.ProviderID, &u.Email,
 		&u.DisplayName, &u.AvatarURL, &u.ResumeMarkdown,
-		&onboardingComplete, &createdAt, &lastLoginAt,
+		&onboardingComplete, &u.NtfyTopic, &createdAt, &lastLoginAt,
+		&passwordHash, &emailVerified, &emailVerifyToken, &emailVerifyExpiresAt,
+		&resetToken, &resetExpiresAt, &bannedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+
 	u.OnboardingComplete = onboardingComplete != 0
+	u.EmailVerified = emailVerified != 0
+
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		u.CreatedAt = t
 	}
 	if t, err := time.Parse(time.RFC3339, lastLoginAt); err == nil {
 		u.LastLoginAt = t
 	}
+
+	if passwordHash.Valid {
+		v := passwordHash.String
+		u.PasswordHash = &v
+	}
+	if emailVerifyToken.Valid {
+		v := emailVerifyToken.String
+		u.EmailVerifyToken = &v
+	}
+	if emailVerifyExpiresAt.Valid {
+		if t, err := time.Parse(time.RFC3339, emailVerifyExpiresAt.String); err == nil {
+			u.EmailVerifyExpiresAt = &t
+		}
+	}
+	if resetToken.Valid {
+		v := resetToken.String
+		u.ResetToken = &v
+	}
+	if resetExpiresAt.Valid {
+		if t, err := time.Parse(time.RFC3339, resetExpiresAt.String); err == nil {
+			u.ResetExpiresAt = &t
+		}
+	}
+	if bannedAt.Valid {
+		if t, err := time.Parse(time.RFC3339, bannedAt.String); err == nil {
+			u.BannedAt = &t
+		}
+	}
+
 	return &u, nil
 }
 
@@ -257,4 +455,237 @@ func scanUserFilter(s scanner) (*models.UserSearchFilter, error) {
 		f.CreatedAt = t
 	}
 	return &f, nil
+}
+
+// AdminFilter is a UserSearchFilter joined with the owning user's email,
+// used by admin list-all-filters views.
+type AdminFilter struct {
+	models.UserSearchFilter
+	UserEmail string
+}
+
+// ListAllUsers returns all users ordered by created_at DESC.
+// It reuses userSelectCols and scanUser to stay in sync with the column list.
+func (s *Store) ListAllUsers(ctx context.Context) ([]models.User, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+userSelectCols+" FROM users ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("store: list all users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: list all users scan: %w", err)
+		}
+		users = append(users, *u)
+	}
+	return users, rows.Err()
+}
+
+// BanUser sets banned_at = NOW() for the given user.
+func (s *Store) BanUser(ctx context.Context, userID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET banned_at = NOW() WHERE id = $1", userID)
+	if err != nil {
+		return fmt.Errorf("store: ban user: %w", err)
+	}
+	return nil
+}
+
+// UnbanUser clears banned_at for the given user.
+func (s *Store) UnbanUser(ctx context.Context, userID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET banned_at = NULL WHERE id = $1", userID)
+	if err != nil {
+		return fmt.Errorf("store: unban user: %w", err)
+	}
+	return nil
+}
+
+// SetPasswordHash updates the password hash for the given user and clears any
+// outstanding reset token so old tokens cannot be reused after an admin reset.
+func (s *Store) SetPasswordHash(ctx context.Context, userID int64, hash string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE users SET password_hash = $1, reset_token = NULL, reset_expires_at = NULL WHERE id = $2",
+		hash, userID)
+	if err != nil {
+		return fmt.Errorf("store: set password hash: %w", err)
+	}
+	return nil
+}
+
+// ListAllFilters returns all user search filters joined with the owning user's
+// email, ordered by created_at DESC.
+func (s *Store) ListAllFilters(ctx context.Context) ([]AdminFilter, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT usf.id, usf.user_id, usf.keywords, usf.location, usf.min_salary, usf.max_salary, usf.title, usf.created_at, u.email
+		FROM user_search_filters usf
+		JOIN users u ON u.id = usf.user_id
+		ORDER BY usf.created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list all filters: %w", err)
+	}
+	defer rows.Close()
+
+	var filters []AdminFilter
+	for rows.Next() {
+		var f AdminFilter
+		var createdAt string
+		err := rows.Scan(
+			&f.ID, &f.UserID, &f.Keywords, &f.Location,
+			&f.MinSalary, &f.MaxSalary, &f.Title, &createdAt, &f.UserEmail,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("store: list all filters scan: %w", err)
+		}
+		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			f.CreatedAt = t
+		}
+		filters = append(filters, f)
+	}
+	return filters, rows.Err()
+}
+
+// CreateUserBannedTerm inserts a new banned term for the given user.
+// Returns ErrDuplicateBannedTerm if the (user_id, term) pair already exists.
+func (s *Store) CreateUserBannedTerm(ctx context.Context, userID int64, term string) (*models.UserBannedTerm, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO user_banned_terms (user_id, term)
+		VALUES ($1, $2)
+		RETURNING id`,
+		userID, term,
+	).Scan(&id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicateBannedTerm
+		}
+		return nil, fmt.Errorf("store: create user banned term: %w", err)
+	}
+
+	bt := &models.UserBannedTerm{
+		ID:        id,
+		UserID:    userID,
+		Term:      term,
+		CreatedAt: time.Now().UTC(),
+	}
+	return bt, nil
+}
+
+// ListUserBannedTerms returns all banned terms for the given user ordered by
+// created_at DESC.
+func (s *Store) ListUserBannedTerms(ctx context.Context, userID int64) ([]models.UserBannedTerm, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, term, created_at
+		FROM user_banned_terms
+		WHERE user_id = $1
+		ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list user banned terms: %w", err)
+	}
+	defer rows.Close()
+
+	var terms []models.UserBannedTerm
+	for rows.Next() {
+		bt, err := scanUserBannedTerm(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: list user banned terms scan: %w", err)
+		}
+		terms = append(terms, *bt)
+	}
+	return terms, rows.Err()
+}
+
+// DeleteUserBannedTerm deletes a banned term by ID, scoped to the given user.
+// Returns an error if the term does not exist or does not belong to the user.
+func (s *Store) DeleteUserBannedTerm(ctx context.Context, userID int64, termID int64) error {
+	res, err := s.db.ExecContext(ctx,
+		"DELETE FROM user_banned_terms WHERE id = $1 AND user_id = $2",
+		termID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: delete user banned term: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete user banned term rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: banned term %d not found for user %d", termID, userID)
+	}
+	return nil
+}
+
+// scanUserBannedTerm scans a single user_banned_terms row.
+func scanUserBannedTerm(s scanner) (*models.UserBannedTerm, error) {
+	var bt models.UserBannedTerm
+	var createdAt string
+	err := s.Scan(&bt.ID, &bt.UserID, &bt.Term, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+		bt.CreatedAt = t
+	}
+	return &bt, nil
+}
+
+// isUniqueViolation returns true if err is a PostgreSQL unique constraint
+// violation (SQLSTATE 23505).
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
+}
+
+// UpsertGoogleDriveToken inserts or updates the encrypted Google Drive OAuth
+// token for the given user. The encryptedJSON value is treated as an opaque
+// string — the store does not encrypt or decrypt it.
+func (s *Store) UpsertGoogleDriveToken(ctx context.Context, userID int64, encryptedJSON string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO user_google_tokens (user_id, token_json)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET token_json = $2, updated_at = now()`,
+		userID, encryptedJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("store: upsert google drive token: %w", err)
+	}
+	return nil
+}
+
+// GetGoogleDriveToken returns the encrypted Google Drive OAuth token for the
+// given user. Returns ErrNotFound when no token exists for the user.
+func (s *Store) GetGoogleDriveToken(ctx context.Context, userID int64) (string, error) {
+	var encryptedJSON string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT token_json FROM user_google_tokens WHERE user_id = $1",
+		userID,
+	).Scan(&encryptedJSON)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("store: get google drive token: %w", err)
+	}
+	return encryptedJSON, nil
+}
+
+// DeleteGoogleDriveToken removes the Google Drive OAuth token for the given
+// user. It is a no-op (no error) when no token exists for the user.
+func (s *Store) DeleteGoogleDriveToken(ctx context.Context, userID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		"DELETE FROM user_google_tokens WHERE user_id = $1",
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: delete google drive token: %w", err)
+	}
+	return nil
 }

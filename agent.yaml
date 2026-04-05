@@ -1,6 +1,6 @@
 project:
   name: "jobhuntr"
-  description: "A project using the Claude Agent framework"
+  description: "JobHuntr is a multi-user Go web application that automates job searching, delivers push notifications, and generates tailored resumes and cover letters using the Claude API."
 
 git:
   default_branch: "development"
@@ -8,16 +8,16 @@ git:
   commit_style: "conventional"
 
 workflow:
-  plans_dir: "plans"
-  worktrees_dir: "worktrees"
-  backlog_file: "workflow/BACKLOG.md"
-  todo_file: "workflow/TODO.md"
-  done_file: "workflow/DONE.md"
-  bugs_file: "workflow/BUGS.md"
+  plans_dir: ".workflow/plans"
+  worktrees_dir: ".worktrees"
+  backlog_file: ".workflow/BACKLOG.md"
+  todo_file: ".workflow/TODO.md"
+  done_file: ".workflow/DONE.md"
+  bugs_file: ".workflow/BUGS.md"
 
 testing:
   enabled: true
-  command: "npm test"
+  command: "go test ./..."
   test_dir: "tests/"
   test_pattern: "test_*"
 
@@ -50,3 +50,17 @@ agents:
   default_type: "coder"
   tasks_dir: "tasks"
   max_workers: 3
+
+# =============================================================================
+# GitHub integration — optional, used by the github-triage agent
+# =============================================================================
+
+# github:
+#   # Explicit repo in owner/repo format. Auto-detected from git remote if omitted.
+#   # repo: "owner/my-project"
+#   # Issues with any of these labels are automatically skipped during triage.
+#   # exclude_labels:
+#   #   - "question"
+#   #   - "wontfix"
+#   #   - "duplicate"
+#   #   - "invalid"

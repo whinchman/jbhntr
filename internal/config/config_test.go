@@ -21,13 +21,10 @@ search_filters:
   - keywords: "staff engineer go"
     location: "New York"
 ntfy:
-  topic: "${TEST_NTFY_TOPIC}"
   server: "https://ntfy.sh"
 claude:
   api_key: "${TEST_CLAUDE_KEY}"
   model: "claude-sonnet-4-20250514"
-resume:
-  path: "./resume.md"
 output:
   dir: "./output"
 `
@@ -84,9 +81,6 @@ func TestLoad(t *testing.T) {
 		if cfg.Claude.Model != "claude-sonnet-4-20250514" {
 			t.Errorf("Claude.Model = %q", cfg.Claude.Model)
 		}
-		if cfg.Resume.Path != "./resume.md" {
-			t.Errorf("Resume.Path = %q", cfg.Resume.Path)
-		}
 		if cfg.Output.Dir != "./output" {
 			t.Errorf("Output.Dir = %q", cfg.Output.Dir)
 		}
@@ -94,7 +88,6 @@ func TestLoad(t *testing.T) {
 
 	t.Run("substitutes env vars", func(t *testing.T) {
 		t.Setenv("TEST_SERPAPI_KEY", "serpkey123")
-		t.Setenv("TEST_NTFY_TOPIC", "myjobs")
 		t.Setenv("TEST_CLAUDE_KEY", "sk-ant-test")
 
 		path := writeTemp(t, sampleYAML)
@@ -105,9 +98,6 @@ func TestLoad(t *testing.T) {
 
 		if cfg.Scraper.SerpAPIKey != "serpkey123" {
 			t.Errorf("SerpAPIKey = %q, want %q", cfg.Scraper.SerpAPIKey, "serpkey123")
-		}
-		if cfg.Ntfy.Topic != "myjobs" {
-			t.Errorf("Ntfy.Topic = %q, want %q", cfg.Ntfy.Topic, "myjobs")
 		}
 		if cfg.Claude.APIKey != "sk-ant-test" {
 			t.Errorf("Claude.APIKey = %q, want %q", cfg.Claude.APIKey, "sk-ant-test")
@@ -138,6 +128,162 @@ func TestLoad(t *testing.T) {
 		_, err := Load(path)
 		if err == nil {
 			t.Error("Load() expected error for invalid YAML, got nil")
+		}
+	})
+}
+
+func TestSMTPConfig(t *testing.T) {
+	t.Run("parses smtp fields correctly", func(t *testing.T) {
+		yaml := `
+smtp:
+  host: "smtp.example.com"
+  port: 587
+  username: "user@example.com"
+  password: "secret"
+  from: "noreply@example.com"
+`
+		path := writeTemp(t, yaml)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.SMTP.Host != "smtp.example.com" {
+			t.Errorf("SMTP.Host = %q, want %q", cfg.SMTP.Host, "smtp.example.com")
+		}
+		if cfg.SMTP.Port != 587 {
+			t.Errorf("SMTP.Port = %d, want 587", cfg.SMTP.Port)
+		}
+		if cfg.SMTP.Username != "user@example.com" {
+			t.Errorf("SMTP.Username = %q, want %q", cfg.SMTP.Username, "user@example.com")
+		}
+		if cfg.SMTP.Password != "secret" {
+			t.Errorf("SMTP.Password = %q, want %q", cfg.SMTP.Password, "secret")
+		}
+		if cfg.SMTP.From != "noreply@example.com" {
+			t.Errorf("SMTP.From = %q, want %q", cfg.SMTP.From, "noreply@example.com")
+		}
+	})
+
+	t.Run("smtp block absent yields zero value (no panic)", func(t *testing.T) {
+		path := writeTemp(t, "server:\n  port: 8080\n")
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.SMTP.Host != "" {
+			t.Errorf("SMTP.Host = %q, want empty string when smtp block absent", cfg.SMTP.Host)
+		}
+		if cfg.SMTP.Port != 0 {
+			t.Errorf("SMTP.Port = %d, want 0 when smtp block absent", cfg.SMTP.Port)
+		}
+	})
+}
+
+func TestGoogleDriveConfig(t *testing.T) {
+	t.Run("parses google_drive fields when present", func(t *testing.T) {
+		yaml := `
+google_drive:
+  client_id: "drive-client-id"
+  client_secret: "drive-client-secret"
+`
+		path := writeTemp(t, yaml)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.GoogleDrive.ClientID != "drive-client-id" {
+			t.Errorf("GoogleDrive.ClientID = %q, want %q", cfg.GoogleDrive.ClientID, "drive-client-id")
+		}
+		if cfg.GoogleDrive.ClientSecret != "drive-client-secret" {
+			t.Errorf("GoogleDrive.ClientSecret = %q, want %q", cfg.GoogleDrive.ClientSecret, "drive-client-secret")
+		}
+	})
+
+	t.Run("google_drive absent yields zero value (no panic)", func(t *testing.T) {
+		path := writeTemp(t, "server:\n  port: 8080\n")
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.GoogleDrive.ClientID != "" {
+			t.Errorf("GoogleDrive.ClientID = %q, want empty string when google_drive block absent", cfg.GoogleDrive.ClientID)
+		}
+		if cfg.GoogleDrive.ClientSecret != "" {
+			t.Errorf("GoogleDrive.ClientSecret = %q, want empty string when google_drive block absent", cfg.GoogleDrive.ClientSecret)
+		}
+	})
+
+	t.Run("substitutes env vars in google_drive fields", func(t *testing.T) {
+		t.Setenv("TEST_GDRIVE_CLIENT_ID", "env-drive-id")
+		t.Setenv("TEST_GDRIVE_CLIENT_SECRET", "env-drive-secret")
+		yaml := `
+google_drive:
+  client_id: "${TEST_GDRIVE_CLIENT_ID}"
+  client_secret: "${TEST_GDRIVE_CLIENT_SECRET}"
+`
+		path := writeTemp(t, yaml)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.GoogleDrive.ClientID != "env-drive-id" {
+			t.Errorf("GoogleDrive.ClientID = %q, want %q", cfg.GoogleDrive.ClientID, "env-drive-id")
+		}
+		if cfg.GoogleDrive.ClientSecret != "env-drive-secret" {
+			t.Errorf("GoogleDrive.ClientSecret = %q, want %q", cfg.GoogleDrive.ClientSecret, "env-drive-secret")
+		}
+	})
+}
+
+func TestOAuthConfig(t *testing.T) {
+	t.Run("oauth.enabled true is parsed", func(t *testing.T) {
+		yaml := `
+auth:
+  session_secret: "mysecret"
+  oauth:
+    enabled: true
+  providers:
+    google:
+      client_id: "gid"
+      client_secret: "gsecret"
+`
+		path := writeTemp(t, yaml)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if !cfg.Auth.OAuth.Enabled {
+			t.Errorf("Auth.OAuth.Enabled = false, want true")
+		}
+		// Ensure existing fields are unchanged.
+		if cfg.Auth.SessionSecret != "mysecret" {
+			t.Errorf("Auth.SessionSecret = %q, want %q", cfg.Auth.SessionSecret, "mysecret")
+		}
+		if cfg.Auth.Providers.Google.ClientID != "gid" {
+			t.Errorf("Auth.Providers.Google.ClientID = %q, want %q", cfg.Auth.Providers.Google.ClientID, "gid")
+		}
+	})
+
+	t.Run("oauth.enabled defaults to false when absent", func(t *testing.T) {
+		yaml := `
+auth:
+  session_secret: "mysecret"
+  providers:
+    github:
+      client_id: "ghid"
+      client_secret: "ghsecret"
+`
+		path := writeTemp(t, yaml)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.Auth.OAuth.Enabled {
+			t.Errorf("Auth.OAuth.Enabled = true, want false when oauth block absent")
+		}
+		// Ensure existing fields are unchanged.
+		if cfg.Auth.Providers.GitHub.ClientID != "ghid" {
+			t.Errorf("Auth.Providers.GitHub.ClientID = %q, want %q", cfg.Auth.Providers.GitHub.ClientID, "ghid")
 		}
 	})
 }

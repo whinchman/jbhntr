@@ -1,0 +1,23 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -buildvcs=false -o ./tmp/air-main ./cmd/jobhuntr"
+bin = "./tmp/air-main"
+args_bin = ["--config", "config.yaml"]
+include_ext = ["go"]
+include_dir = ["cmd", "internal"]
+exclude_dir = ["tmp", "output", "worktrees", ".workflow", "vendor"]
+delay = 500
+
+[log]
+time = true
+
+[color]
+main = "magenta"
+watcher = "cyan"
+build = "yellow"
+runner = "green"
+
+[misc]
+clean_on_exit = true

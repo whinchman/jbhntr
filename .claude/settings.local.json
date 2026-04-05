@@ -32,7 +32,11 @@
       "Bash(docker compose:*)",
       "Bash(go build:*)",
       "Bash(go vet:*)",
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "mcp__render__list_services",
+      "mcp__render__list_workspaces",
+      "mcp__render__list_deploys",
+      "mcp__render__list_logs"
     ]
   }
 }

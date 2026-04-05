@@ -14,10 +14,10 @@ import (
 
 // Config is the root configuration object.
 type Config struct {
-	Server   ServerConfig  `yaml:"server"`
-	Auth     AuthConfig    `yaml:"auth"`
+	Server   ServerConfig   `yaml:"server"`
+	Auth     AuthConfig     `yaml:"auth"`
 	Database DatabaseConfig `yaml:"database"`
-	Scraper  ScraperConfig `yaml:"scraper"`
+	Scraper  ScraperConfig  `yaml:"scraper"`
 	// SearchFilters holds global search filters parsed from the config file.
 	// Deprecated: per-user search filters are now stored in the database
 	// (user_search_filters table) and managed via the web UI. This field is
@@ -25,10 +25,22 @@ type Config struct {
 	SearchFilters []SearchFilter `yaml:"search_filters"`
 	Ntfy          NtfyConfig     `yaml:"ntfy"`
 	Claude        ClaudeConfig   `yaml:"claude"`
-	// Resume is the fallback resume file for the generator worker. Per-user
-	// resumes are stored in the database (users.resume_markdown).
-	Resume ResumeConfig `yaml:"resume"`
 	Output OutputConfig `yaml:"output"`
+	// SMTP holds outbound email settings for the mailer.
+	// Example config:
+	//   smtp:
+	//     host: ${SMTP_HOST}
+	//     port: 587
+	//     username: ${SMTP_USERNAME}
+	//     password: ${SMTP_PASSWORD}
+	//     from: noreply@example.com
+	SMTP  SMTPConfig  `yaml:"smtp"`
+	// Admin holds HTTP Basic Auth credentials for the /admin panel.
+	Admin AdminConfig `yaml:"admin"`
+	// GoogleDrive holds OAuth client credentials for the Google Drive integration.
+	// The section is optional; when absent the zero-value struct is used and Drive
+	// routes are not registered (checked via cfg.GoogleDrive.ClientID != "").
+	GoogleDrive GoogleDriveConfig `yaml:"google_drive"`
 }
 
 // DatabaseConfig holds PostgreSQL connection settings.
@@ -39,10 +51,31 @@ type DatabaseConfig struct {
 	URL string `yaml:"url"`
 }
 
+// OAuthConfig holds top-level OAuth feature flags.
+// It is consumed in internal/web/server.go:
+//
+//	if cfg.Auth.OAuth.Enabled {
+//	    srv.oauthProviders = oauthProviders(cfg.Auth, cfg.Server.BaseURL)
+//	}
+type OAuthConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 // AuthConfig holds OAuth and session configuration.
 type AuthConfig struct {
 	SessionSecret string          `yaml:"session_secret"`
+	OAuth         OAuthConfig     `yaml:"oauth"`
 	Providers     ProvidersConfig `yaml:"providers"`
+}
+
+// SMTPConfig holds outbound email (SMTP) settings.
+// Values flow to mailer.NewSMTPMailer in main.go.
+type SMTPConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	From     string `yaml:"from"`
 }
 
 // ProvidersConfig holds per-provider OAuth credentials.
@@ -65,8 +98,10 @@ type ServerConfig struct {
 
 // ScraperConfig holds scraping settings.
 type ScraperConfig struct {
-	Interval   string `yaml:"interval"`
-	SerpAPIKey string `yaml:"serpapi_key"`
+	Interval       string   `yaml:"interval"`
+	SerpAPIKey     string   `yaml:"serpapi_key"`
+	JSearchKey     string   `yaml:"jsearch_key"`     // RapidAPI key for JSearch (jsearch.p.rapidapi.com)
+	EnabledSources []string `yaml:"enabled_sources"` // nil/empty = all configured sources enabled
 }
 
 // SearchFilter represents a single job search query.
@@ -79,8 +114,8 @@ type SearchFilter struct {
 }
 
 // NtfyConfig holds ntfy.sh notification settings.
+// Per-user topics are stored in the database (users.ntfy_topic).
 type NtfyConfig struct {
-	Topic  string `yaml:"topic"`
 	Server string `yaml:"server"`
 }
 
@@ -90,14 +125,24 @@ type ClaudeConfig struct {
 	Model  string `yaml:"model"`
 }
 
-// ResumeConfig points to the base resume file.
-type ResumeConfig struct {
-	Path string `yaml:"path"`
-}
-
 // OutputConfig specifies where generated files are written.
 type OutputConfig struct {
 	Dir string `yaml:"dir"`
+}
+
+// AdminConfig holds credentials for the /admin panel (HTTP Basic Auth).
+// The username is always "admin"; only the password is configurable.
+type AdminConfig struct {
+	Password string `yaml:"password"`
+}
+
+// GoogleDriveConfig holds OAuth client credentials for the Google Drive
+// integration. The section is entirely optional; when absent from the config
+// file the zero-value struct is used. The web server checks
+// cfg.GoogleDrive.ClientID != "" before registering Drive routes.
+type GoogleDriveConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
 }
 
 var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)

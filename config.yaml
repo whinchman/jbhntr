@@ -1,0 +1,43 @@
+claude:
+    api_key: ${ANTHROPIC_API_KEY}
+    model: claude-sonnet-4-20250514
+ntfy:
+    server: https://ntfy.sh
+    topic: ${NTFY_TOPIC}
+output:
+    dir: ./output
+scraper:
+    interval: 1h
+    serpapi_key: ${SERPAPI_KEY}
+search_filters:
+    - keywords: senior software engineer
+      location: Remote
+      min_salary: 160000
+      max_salary: 0
+      title: ""
+    - keywords: staff engineer go
+      location: Remote
+      min_salary: 200000
+      max_salary: 0
+      title: ""
+    - keywords: staff engineer
+      location: Remote
+      min_salary: 200000
+      max_salary: 0
+      title: ""
+    - keywords: Prompt Enginer
+      location: Remote
+      min_salary: 250000
+      max_salary: 0
+      title: ""
+server:
+    base_url: https://jobhuntr-w083.onrender.com
+    port: 44566
+admin:
+    password: ${ADMIN_PASSWORD}
+auth:
+    session_secret: ${SESSION_SECRET}
+    providers:
+        github:
+            client_id: ${GITHUB_CLIENT_ID}
+            client_secret: ${GITHUB_CLIENT_SECRET}

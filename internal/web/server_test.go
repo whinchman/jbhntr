@@ -22,8 +22,9 @@ import (
 // ─── mock JobStore ───────────────────────────────────────────────────────────
 
 type mockJobStore struct {
-	mu   sync.Mutex
-	jobs map[int64]*models.Job
+	mu           sync.Mutex
+	jobs         map[int64]*models.Job
+	retryJobErr  error // if non-nil, RetryJob returns this error (for 500-path tests)
 }
 
 func newMockJobStore(jobs ...*models.Job) *mockJobStore {
@@ -78,20 +79,61 @@ func (m *mockJobStore) UpdateJobStatus(_ context.Context, userID int64, id int64
 	return nil
 }
 
+func (m *mockJobStore) UpdateApplicationStatus(_ context.Context, userID int64, id int64, status models.ApplicationStatus) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return fmt.Errorf("store: job %d not found", id)
+	}
+	if userID != 0 && j.UserID != userID {
+		return fmt.Errorf("store: job %d not found", id)
+	}
+	j.ApplicationStatus = status
+	return nil
+}
+
+func (m *mockJobStore) RetryJob(_ context.Context, userID int64, id int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// If a forced error is set (e.g. to simulate an unexpected DB failure), return
+	// it unconditionally so the caller can test the 500 path.
+	if m.retryJobErr != nil {
+		return m.retryJobErr
+	}
+	j, ok := m.jobs[id]
+	if !ok {
+		return fmt.Errorf("store: job not found, does not belong to user, or is not in failed status")
+	}
+	if userID != 0 && j.UserID != userID {
+		return fmt.Errorf("store: job not found, does not belong to user, or is not in failed status")
+	}
+	if j.Status != models.StatusFailed {
+		return fmt.Errorf("store: job not found, does not belong to user, or is not in failed status")
+	}
+	j.Status = models.StatusApproved
+	j.ErrorMsg = ""
+	return nil
+}
+
 // ─── mock FilterStore ───────────────────────────────────────────────────────
 
 type mockFilterStore struct {
-	mu      sync.Mutex
-	filters map[int64][]models.UserSearchFilter
-	resumes map[int64]string
-	nextID  int64
+	mu          sync.Mutex
+	filters     map[int64][]models.UserSearchFilter
+	resumes     map[int64]string
+	ntfyTopics  map[int64]string
+	nextID      int64
+	bannedTerms map[int64][]models.UserBannedTerm
 }
 
 func newMockFilterStore() *mockFilterStore {
 	return &mockFilterStore{
-		filters: make(map[int64][]models.UserSearchFilter),
-		resumes: make(map[int64]string),
-		nextID:  1,
+		filters:     make(map[int64][]models.UserSearchFilter),
+		resumes:     make(map[int64]string),
+		ntfyTopics:  make(map[int64]string),
+		nextID:      1,
+		bannedTerms: make(map[int64][]models.UserBannedTerm),
 	}
 }
 
@@ -129,6 +171,50 @@ func (m *mockFilterStore) UpdateUserResume(_ context.Context, userID int64, mark
 	defer m.mu.Unlock()
 	m.resumes[userID] = markdown
 	return nil
+}
+
+func (m *mockFilterStore) UpdateUserNtfyTopic(_ context.Context, userID int64, topic string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ntfyTopics[userID] = topic
+	return nil
+}
+
+func (m *mockFilterStore) ListUserBannedTerms(_ context.Context, userID int64) ([]models.UserBannedTerm, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bannedTerms[userID], nil
+}
+
+func (m *mockFilterStore) CreateUserBannedTerm(_ context.Context, userID int64, term string) (*models.UserBannedTerm, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.bannedTerms[userID] {
+		if t.Term == term {
+			return nil, fmt.Errorf("store: banned term already exists for user")
+		}
+	}
+	bt := models.UserBannedTerm{
+		ID:     m.nextID,
+		UserID: userID,
+		Term:   term,
+	}
+	m.nextID++
+	m.bannedTerms[userID] = append(m.bannedTerms[userID], bt)
+	return &bt, nil
+}
+
+func (m *mockFilterStore) DeleteUserBannedTerm(_ context.Context, userID int64, termID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	terms := m.bannedTerms[userID]
+	for i, t := range terms {
+		if t.ID == termID {
+			m.bannedTerms[userID] = append(terms[:i], terms[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("store: banned term %d not found for user %d", termID, userID)
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -378,6 +464,113 @@ func TestRejectJob(t *testing.T) {
 
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestRetryJob(t *testing.T) {
+	t.Run("retry failed job returns 200 with approved status and cleared error_msg", func(t *testing.T) {
+		job := newTestJob(10, models.StatusFailed)
+		job.ErrorMsg = "LLM error"
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/api/jobs/10/retry", "application/json", nil)
+		if err != nil {
+			t.Fatalf("POST /api/jobs/10/retry: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status = %d, want 200; body: %s", resp.StatusCode, body)
+		}
+		var got models.Job
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Status != models.StatusApproved {
+			t.Errorf("status = %q, want approved", got.Status)
+		}
+		if got.ErrorMsg != "" {
+			t.Errorf("error_msg = %q, want empty string after successful retry", got.ErrorMsg)
+		}
+	})
+
+	t.Run("retry non-existent job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/api/jobs/999/retry", "application/json", nil)
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("retry non-failed job returns 409", func(t *testing.T) {
+		ts := newServer(t, newTestJob(20, models.StatusApproved))
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/api/jobs/20/retry", "application/json", nil)
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusConflict {
+			t.Errorf("status = %d, want 409", resp.StatusCode)
+		}
+	})
+
+	t.Run("retry job HTMX returns 204 with HX-Redirect", func(t *testing.T) {
+		job := newTestJob(30, models.StatusFailed)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/jobs/30/retry", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("HX-Request", "true")
+
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("do: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNoContent {
+			t.Errorf("status = %d, want 204", resp.StatusCode)
+		}
+		if got := resp.Header.Get("HX-Redirect"); got == "" {
+			t.Errorf("expected HX-Redirect header to be set")
+		}
+	})
+
+	t.Run("unexpected DB error from RetryJob returns 500", func(t *testing.T) {
+		// Set up a failed job that passes the GetJob and status-guard checks, but
+		// whose RetryJob call returns an unexpected (non-"not found") DB error.
+		job := newTestJob(40, models.StatusFailed)
+		ms := newMockJobStore(job)
+		ms.retryJobErr = fmt.Errorf("pq: connection reset by peer")
+		srv := web.NewServer(ms)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/api/jobs/40/retry", "application/json", nil)
+		if err != nil {
+			t.Fatalf("POST /api/jobs/40/retry: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusInternalServerError {
+			body, _ := io.ReadAll(resp.Body)
+			t.Errorf("status = %d, want 500; body: %s", resp.StatusCode, body)
 		}
 	})
 }
@@ -1045,6 +1238,532 @@ func TestApproveJob_UserIsolation(t *testing.T) {
 
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("status = %d, want 404 (user isolation)", resp.StatusCode)
+		}
+	})
+}
+
+// ─── markdown download tests ─────────────────────────────────────────────────
+
+// newJobWithMarkdown creates a job with ResumeMarkdown and CoverMarkdown set.
+func newJobWithMarkdown(id int64) *models.Job {
+	return &models.Job{
+		ID:             id,
+		Title:          "Staff Engineer",
+		Company:        "Globex",
+		Location:       "Remote",
+		Status:         models.StatusComplete,
+		ResumeMarkdown: "# Resume\n\nThis is my resume.",
+		CoverMarkdown:  "# Cover Letter\n\nDear Hiring Manager,",
+	}
+}
+
+func TestDownloadResumeMarkdown(t *testing.T) {
+	t.Run("job with ResumeMarkdown returns 200 and markdown content", func(t *testing.T) {
+		job := newJobWithMarkdown(20)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/20/resume.md")
+		if err != nil {
+			t.Fatalf("GET /output/20/resume.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.HasPrefix(ct, "text/markdown") {
+			t.Errorf("Content-Type = %q, want text/markdown", ct)
+		}
+		cd := resp.Header.Get("Content-Disposition")
+		if !strings.Contains(cd, "resume.md") {
+			t.Errorf("Content-Disposition = %q, want attachment; filename=resume.md", cd)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), "# Resume") {
+			t.Errorf("body = %q, want to contain resume markdown", string(body))
+		}
+	})
+
+	t.Run("job with empty ResumeMarkdown returns 404", func(t *testing.T) {
+		job := newTestJob(21, models.StatusComplete)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/21/resume.md")
+		if err != nil {
+			t.Fatalf("GET /output/21/resume.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/resume.md")
+		if err != nil {
+			t.Fatalf("GET /output/999/resume.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestDownloadCoverMarkdown(t *testing.T) {
+	t.Run("job with CoverMarkdown returns 200 and markdown content", func(t *testing.T) {
+		job := newJobWithMarkdown(30)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/30/cover_letter.md")
+		if err != nil {
+			t.Fatalf("GET /output/30/cover_letter.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.HasPrefix(ct, "text/markdown") {
+			t.Errorf("Content-Type = %q, want text/markdown", ct)
+		}
+		cd := resp.Header.Get("Content-Disposition")
+		if !strings.Contains(cd, "cover_letter.md") {
+			t.Errorf("Content-Disposition = %q, want attachment; filename=cover_letter.md", cd)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), "# Cover Letter") {
+			t.Errorf("body = %q, want to contain cover letter markdown", string(body))
+		}
+	})
+
+	t.Run("job with empty CoverMarkdown returns 404", func(t *testing.T) {
+		job := newTestJob(31, models.StatusComplete)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/31/cover_letter.md")
+		if err != nil {
+			t.Fatalf("GET /output/31/cover_letter.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/cover_letter.md")
+		if err != nil {
+			t.Fatalf("GET /output/999/cover_letter.md: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestDownloadResumeDocx(t *testing.T) {
+	t.Run("job with ResumeMarkdown returns 200 and DOCX content", func(t *testing.T) {
+		job := newJobWithMarkdown(40)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/40/resume.docx")
+		if err != nil {
+			t.Fatalf("GET /output/40/resume.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		wantCT := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		if ct != wantCT {
+			t.Errorf("Content-Type = %q, want %q", ct, wantCT)
+		}
+		cd := resp.Header.Get("Content-Disposition")
+		if !strings.Contains(cd, "resume.docx") {
+			t.Errorf("Content-Disposition = %q, want attachment; filename=resume.docx", cd)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		// DOCX files start with PK (zip magic bytes)
+		if len(body) < 2 || body[0] != 'P' || body[1] != 'K' {
+			t.Errorf("body does not look like a DOCX/ZIP file (first bytes: %v)", body[:4])
+		}
+	})
+
+	t.Run("job with empty ResumeMarkdown returns 404", func(t *testing.T) {
+		job := newTestJob(41, models.StatusComplete)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/41/resume.docx")
+		if err != nil {
+			t.Fatalf("GET /output/41/resume.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/resume.docx")
+		if err != nil {
+			t.Fatalf("GET /output/999/resume.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+func TestDownloadCoverDocx(t *testing.T) {
+	t.Run("job with CoverMarkdown returns 200 and DOCX content", func(t *testing.T) {
+		job := newJobWithMarkdown(50)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/50/cover_letter.docx")
+		if err != nil {
+			t.Fatalf("GET /output/50/cover_letter.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		wantCT := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		if ct != wantCT {
+			t.Errorf("Content-Type = %q, want %q", ct, wantCT)
+		}
+		cd := resp.Header.Get("Content-Disposition")
+		if !strings.Contains(cd, "cover_letter.docx") {
+			t.Errorf("Content-Disposition = %q, want attachment; filename=cover_letter.docx", cd)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if len(body) < 2 || body[0] != 'P' || body[1] != 'K' {
+			t.Errorf("body does not look like a DOCX/ZIP file (first bytes: %v)", body[:4])
+		}
+	})
+
+	t.Run("job with empty CoverMarkdown returns 404", func(t *testing.T) {
+		job := newTestJob(51, models.StatusComplete)
+		ts := newServer(t, job)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/51/cover_letter.docx")
+		if err != nil {
+			t.Fatalf("GET /output/51/cover_letter.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown job returns 404", func(t *testing.T) {
+		ts := newServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/output/999/cover_letter.docx")
+		if err != nil {
+			t.Fatalf("GET /output/999/cover_letter.docx: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+// ─── approved/rejected pages and application status tests ─────────────────────
+
+func TestHandleApprovedJobs_RequiresAuth(t *testing.T) {
+	ts := newServer(t,
+		newTestJob(1, models.StatusApproved),
+		newTestJob(2, models.StatusComplete),
+	)
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL + "/jobs/approved")
+	if err != nil {
+		t.Fatalf("GET /jobs/approved: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	_ = body // response rendered without error
+}
+
+func TestHandleRejectedJobs_RequiresAuth(t *testing.T) {
+	ts := newServer(t,
+		newTestJob(1, models.StatusRejected),
+	)
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL + "/jobs/rejected")
+	if err != nil {
+		t.Fatalf("GET /jobs/rejected: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+func TestHandleSetApplicationStatus_HTMXResponse(t *testing.T) {
+	job := newTestJob(1, models.StatusApproved)
+	ts := newServer(t, job)
+	defer ts.Close()
+
+	form := url.Values{"application_status": {"applied"}}
+	resp, err := ts.Client().PostForm(ts.URL+"/api/jobs/1/application-status", form)
+	if err != nil {
+		t.Fatalf("POST /api/jobs/1/application-status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body: %s", resp.StatusCode, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+func TestHandleSetApplicationStatus_InvalidStatus(t *testing.T) {
+	job := newTestJob(1, models.StatusApproved)
+	ts := newServer(t, job)
+	defer ts.Close()
+
+	form := url.Values{"application_status": {"bogus"}}
+	resp, err := ts.Client().PostForm(ts.URL+"/api/jobs/1/application-status", form)
+	if err != nil {
+		t.Fatalf("POST /api/jobs/1/application-status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want 400; body: %s", resp.StatusCode, body)
+	}
+}
+
+func TestHandleSetApplicationStatus_NonApprovedJob(t *testing.T) {
+	// A job in "discovered" status is not in the approved pipeline.
+	job := newTestJob(1, models.StatusDiscovered)
+	ts := newServer(t, job)
+	defer ts.Close()
+
+	form := url.Values{"application_status": {"applied"}}
+	resp, err := ts.Client().PostForm(ts.URL+"/api/jobs/1/application-status", form)
+	if err != nil {
+		t.Fatalf("POST /api/jobs/1/application-status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want 403; body: %s", resp.StatusCode, body)
+	}
+}
+
+// ─── banned terms handler tests ───────────────────────────────────────────────
+
+func TestHandleAddBannedTerm(t *testing.T) {
+	t.Run("POST /settings/banned-terms with valid term adds it and redirects", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"term": {"Staffing Agency"}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Should redirect (3xx) to /settings?saved=1
+		if resp.StatusCode/100 != 3 && resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 3xx redirect", resp.StatusCode)
+		}
+
+		fs.mu.Lock()
+		terms := fs.bannedTerms[0]
+		fs.mu.Unlock()
+		if len(terms) != 1 {
+			t.Fatalf("expected 1 banned term, got %d", len(terms))
+		}
+		if terms[0].Term != "Staffing Agency" {
+			t.Errorf("term = %q, want %q", terms[0].Term, "Staffing Agency")
+		}
+	})
+
+	t.Run("POST /settings/banned-terms with blank term returns 400", func(t *testing.T) {
+		ts, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"term": {""}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+
+	t.Run("POST /settings/banned-terms with whitespace-only term returns 400", func(t *testing.T) {
+		ts, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		form := url.Values{"term": {"   "}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+
+	t.Run("POST /settings/banned-terms with duplicate term redirects silently", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
+		defer ts.Close()
+
+		// Seed a term.
+		fs.CreateUserBannedTerm(context.Background(), 0, "Duplicate Term")
+
+		form := url.Values{"term": {"Duplicate Term"}}
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Duplicate should redirect silently (not error).
+		if resp.StatusCode/100 != 3 && resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 3xx redirect for duplicate", resp.StatusCode)
+		}
+
+		// Verify only one copy exists.
+		fs.mu.Lock()
+		count := len(fs.bannedTerms[0])
+		fs.mu.Unlock()
+		if count != 1 {
+			t.Errorf("expected 1 banned term after duplicate add, got %d", count)
+		}
+	})
+}
+
+func TestHandleRemoveBannedTerm(t *testing.T) {
+	t.Run("POST /settings/banned-terms/remove removes the term and redirects", func(t *testing.T) {
+		ts, fs := newSettingsServer(t)
+		defer ts.Close()
+
+		bt, _ := fs.CreateUserBannedTerm(context.Background(), 0, "ToRemove")
+
+		resp, err := ts.Client().Post(
+			fmt.Sprintf("%s/settings/banned-terms/remove?id=%d", ts.URL, bt.ID),
+			"application/x-www-form-urlencoded", nil,
+		)
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms/remove: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode/100 != 3 && resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 3xx redirect", resp.StatusCode)
+		}
+
+		fs.mu.Lock()
+		remaining := fs.bannedTerms[0]
+		fs.mu.Unlock()
+		if len(remaining) != 0 {
+			t.Errorf("expected 0 banned terms after remove, got %d", len(remaining))
+		}
+	})
+
+	t.Run("POST /settings/banned-terms/remove with invalid id returns 400", func(t *testing.T) {
+		ts, _ := newSettingsServer(t)
+		defer ts.Close()
+
+		resp, err := ts.Client().Post(ts.URL+"/settings/banned-terms/remove?id=notanid", "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatalf("POST /settings/banned-terms/remove: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+}
+
+func TestSettingsPage_ShowsBannedTerms(t *testing.T) {
+	t.Run("settings page renders banned terms section", func(t *testing.T) {
+		ms := newMockJobStore()
+		fs := newMockFilterStore()
+		fs.CreateUserBannedTerm(context.Background(), 0, "ContractRole")
+
+		srv := web.NewServerWithConfig(ms, nil, fs, nil)
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		resp, err := ts.Client().Get(ts.URL + "/settings")
+		if err != nil {
+			t.Fatalf("GET /settings: %v", err)
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), "ContractRole") {
+			t.Errorf("settings page does not contain banned term 'ContractRole'")
+		}
+		if !strings.Contains(string(body), "Banned Keywords") {
+			t.Errorf("settings page does not contain 'Banned Keywords' section heading")
 		}
 	})
 }

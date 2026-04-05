@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,13 +27,21 @@ type StoreWriter interface {
 type UserFilterReader interface {
 	ListActiveUserIDs(ctx context.Context) ([]int64, error)
 	ListUserFilters(ctx context.Context, userID int64) ([]models.UserSearchFilter, error)
+	ListUserBannedTerms(ctx context.Context, userID int64) ([]models.UserBannedTerm, error)
+}
+
+// UserReader provides access to user records.
+// The scheduler uses this to fetch the ntfy topic per user before notifying.
+type UserReader interface {
+	GetUser(ctx context.Context, id int64) (*models.User, error)
 }
 
 // Scheduler periodically searches all configured filters and persists new jobs.
 type Scheduler struct {
-	source      Source
+	sources     []Source
 	store       StoreWriter
 	userFilters UserFilterReader
+	userReader  UserReader
 	notifier    notifier.Notifier
 	summarizer  generator.Summarizer
 	interval    time.Duration
@@ -50,13 +59,32 @@ func (s *Scheduler) LastScrapeAt() time.Time {
 	return s.lastScrapeAt
 }
 
-// NewScheduler constructs a Scheduler. If logger is nil, slog.Default() is used.
-func NewScheduler(source Source, st StoreWriter, uf UserFilterReader, interval time.Duration, logger *slog.Logger) *Scheduler {
+// Interval returns the configured scrape interval.
+func (s *Scheduler) Interval() time.Duration {
+	return s.interval
+}
+
+// NewScheduler constructs a Scheduler with one or more Sources. If logger is
+// nil, slog.Default() is used.
+//
+// Each source must have a unique name (as returned by Source.Name). If two or
+// more sources share the same name, NewScheduler panics because the Scheduler
+// keys per-source ScrapeRun metrics by source name and duplicate names would
+// silently overwrite each other's data.
+func NewScheduler(sources []Source, st StoreWriter, uf UserFilterReader, interval time.Duration, logger *slog.Logger) *Scheduler {
+	seen := make(map[string]struct{}, len(sources))
+	for _, src := range sources {
+		if _, exists := seen[src.Name()]; exists {
+			panic(fmt.Sprintf("scraper: duplicate source name %q", src.Name()))
+		}
+		seen[src.Name()] = struct{}{}
+	}
+
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Scheduler{
-		source:      source,
+		sources:     sources,
 		store:       st,
 		userFilters: uf,
 		interval:    interval,
@@ -67,6 +95,13 @@ func NewScheduler(source Source, st StoreWriter, uf UserFilterReader, interval t
 // WithNotifier sets an optional Notifier on the Scheduler.
 func (s *Scheduler) WithNotifier(n notifier.Notifier) *Scheduler {
 	s.notifier = n
+	return s
+}
+
+// WithUserReader sets the UserReader used to fetch per-user ntfy topics.
+// Required when a Notifier is set; without it notifications are skipped.
+func (s *Scheduler) WithUserReader(ur UserReader) *Scheduler {
+	s.userReader = ur
 	return s
 }
 
@@ -95,9 +130,28 @@ func (s *Scheduler) RunOnce(ctx context.Context) ([]models.Job, error) {
 			s.logger.Error("failed to list filters for user", "user_id", userID, "error", err)
 			continue
 		}
+
+		// Fetch the user's banned terms once per user; errors are non-fatal.
+		bannedTerms, err := s.userFilters.ListUserBannedTerms(ctx, userID)
+		if err != nil {
+			s.logger.Error("failed to list banned terms for user", "user_id", userID, "error", err)
+			bannedTerms = nil
+		}
+
+		// Fetch the user's ntfy topic once per user, before iterating filters.
+		ntfyTopic := ""
+		if s.notifier != nil && s.userReader != nil {
+			user, err := s.userReader.GetUser(ctx, userID)
+			if err != nil {
+				s.logger.Error("failed to get user for ntfy topic", "user_id", userID, "error", err)
+			} else {
+				ntfyTopic = user.NtfyTopic
+			}
+		}
+
 		for _, uf := range filters {
 			filter := userFilterToSearchFilter(uf)
-			jobs, err := s.runFilter(ctx, userID, filter)
+			jobs, err := s.runFilter(ctx, userID, ntfyTopic, filter, bannedTerms)
 			if err != nil {
 				s.logger.Error("scrape filter failed", "user_id", userID, "filter", filter.Keywords, "error", err)
 				continue
@@ -125,31 +179,135 @@ func userFilterToSearchFilter(uf models.UserSearchFilter) models.SearchFilter {
 	}
 }
 
-// runFilter runs one search filter for a specific user: searches, stores
-// results, logs the run.
-func (s *Scheduler) runFilter(ctx context.Context, userID int64, filter models.SearchFilter) ([]models.Job, error) {
-	started := time.Now()
-	run := &store.ScrapeRun{
-		Source:         "serpapi",
-		FilterKeywords: filter.Keywords,
-		StartedAt:      started,
+// filterBannedJobs returns jobs that do not match any of the banned terms.
+// Matching is case-insensitive substring matching on Title, Company, and
+// Description. If terms is empty the input slice is returned unchanged.
+func filterBannedJobs(jobs []models.Job, terms []models.UserBannedTerm) []models.Job {
+	if len(terms) == 0 {
+		return jobs
 	}
-
-	results, searchErr := s.source.Search(ctx, filter)
-	if searchErr != nil {
-		run.FinishedAt = time.Now()
-		run.Error = searchErr.Error()
-		if logErr := s.store.CreateScrapeRun(ctx, run); logErr != nil {
-			s.logger.Error("failed to log scrape run", "error", logErr, "filter", filter.Keywords)
+	lower := make([]string, len(terms))
+	for i, t := range terms {
+		lower[i] = strings.ToLower(t.Term)
+	}
+	out := jobs[:0]
+	for _, j := range jobs {
+		titleL := strings.ToLower(j.Title)
+		companyL := strings.ToLower(j.Company)
+		descL := strings.ToLower(j.Description)
+		banned := false
+		for _, t := range lower {
+			if strings.Contains(titleL, t) ||
+				strings.Contains(companyL, t) ||
+				strings.Contains(descL, t) {
+				banned = true
+				break
+			}
 		}
-		return nil, fmt.Errorf("scheduler: search filter %q: %w", filter.Keywords, searchErr)
+		if !banned {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
+// srcResult holds the outcome of one source's Search call within runFilter.
+type srcResult struct {
+	jobs []models.Job
+	name string
+	err  error
+}
+
+// taggedJob associates a job with the name of the source that returned it.
+// Used to attribute JobsNew counts back to per-source ScrapeRun records.
+type taggedJob struct {
+	job     models.Job
+	srcName string
+}
+
+// filterBannedTagged filters tagged jobs using the same banned-term logic as
+// filterBannedJobs, preserving source attribution.
+func filterBannedTagged(tagged []taggedJob, terms []models.UserBannedTerm) []taggedJob {
+	if len(terms) == 0 {
+		return tagged
+	}
+	lower := make([]string, len(terms))
+	for i, t := range terms {
+		lower[i] = strings.ToLower(t.Term)
+	}
+	out := tagged[:0]
+	for _, tj := range tagged {
+		j := tj.job
+		titleL := strings.ToLower(j.Title)
+		companyL := strings.ToLower(j.Company)
+		descL := strings.ToLower(j.Description)
+		banned := false
+		for _, t := range lower {
+			if strings.Contains(titleL, t) ||
+				strings.Contains(companyL, t) ||
+				strings.Contains(descL, t) {
+				banned = true
+				break
+			}
+		}
+		if !banned {
+			out = append(out, tj)
+		}
+	}
+	return out
+}
+
+// runFilter fans out to all sources concurrently for a single filter, collects
+// results, assigns dedup fingerprints, applies banned-term filtering, stores
+// new jobs, and writes one ScrapeRun record per source.
+func (s *Scheduler) runFilter(ctx context.Context, userID int64, ntfyTopic string, filter models.SearchFilter, bannedTerms []models.UserBannedTerm) ([]models.Job, error) {
+	started := time.Now()
+
+	// Fan out: launch one goroutine per source.
+	resultCh := make(chan srcResult, len(s.sources))
+	for _, src := range s.sources {
+		go func(src Source) {
+			jobs, err := src.Search(ctx, filter)
+			resultCh <- srcResult{jobs: jobs, name: src.Name(), err: err}
+		}(src)
 	}
 
-	run.JobsFound = len(results)
+	// Collect results. Track per-source metadata for ScrapeRun records.
+	// errored maps source name → error string (non-empty when source failed).
+	errored := make(map[string]string, len(s.sources))
+	// jobsFound maps source name → count of raw jobs returned (before filtering).
+	jobsFound := make(map[string]int, len(s.sources))
 
+	// tagged preserves the source name alongside each job for later attribution.
+	var tagged []taggedJob
+
+	for range s.sources {
+		r := <-resultCh
+		if r.err != nil {
+			s.logger.Error("source search failed", "source", r.name, "error", r.err)
+			errored[r.name] = r.err.Error()
+			jobsFound[r.name] = 0
+			continue
+		}
+		jobsFound[r.name] = len(r.jobs)
+		for _, j := range r.jobs {
+			tagged = append(tagged, taggedJob{job: j, srcName: r.name})
+		}
+	}
+
+	// Assign dedup fingerprints before the banned-term filter.
+	for i := range tagged {
+		tagged[i].job.DedupHash = FingerprintJob(tagged[i].job.Title, tagged[i].job.Company)
+	}
+
+	// Apply banned-term filter while preserving source attribution.
+	tagged = filterBannedTagged(tagged, bannedTerms)
+
+	// jobsNew tracks new inserts attributed back to each source name.
+	jobsNew := make(map[string]int, len(s.sources))
 	var newJobs []models.Job
-	for i := range results {
-		job := &results[i]
+	for i := range tagged {
+		job := &tagged[i].job
 		if job.Status == "" {
 			job.Status = models.StatusDiscovered
 		}
@@ -159,27 +317,41 @@ func (s *Scheduler) runFilter(ctx context.Context, userID int64, filter models.S
 			continue
 		}
 		if inserted {
+			jobsNew[tagged[i].srcName]++
 			newJobs = append(newJobs, *job)
 		}
 	}
 
-	run.JobsNew = len(newJobs)
-	run.FinishedAt = time.Now()
-
-	if err := s.store.CreateScrapeRun(ctx, run); err != nil {
-		s.logger.Error("failed to log scrape run", "error", err, "filter", filter.Keywords)
+	// Write one ScrapeRun per source.
+	finishedAt := time.Now()
+	for _, src := range s.sources {
+		name := src.Name()
+		run := &store.ScrapeRun{
+			Source:         name,
+			FilterKeywords: filter.Keywords,
+			JobsFound:      jobsFound[name],
+			JobsNew:        jobsNew[name],
+			StartedAt:      started,
+			FinishedAt:     finishedAt,
+		}
+		if errStr, ok := errored[name]; ok {
+			run.Error = errStr
+		}
+		if logErr := s.store.CreateScrapeRun(ctx, run); logErr != nil {
+			s.logger.Error("failed to log scrape run", "error", logErr, "source", name, "filter", filter.Keywords)
+		}
 	}
 
 	s.logger.Info("scrape complete",
 		"user_id", userID,
 		"filter", filter.Keywords,
-		"found", run.JobsFound,
-		"new", run.JobsNew,
-		"duration", run.FinishedAt.Sub(started),
+		"found", len(tagged),
+		"new", len(newJobs),
+		"duration", time.Since(started),
 	)
 
 	newJobs = s.summarizeNewJobs(ctx, userID, newJobs)
-	s.notifyNewJobs(ctx, userID, newJobs)
+	s.notifyNewJobs(ctx, userID, ntfyTopic, newJobs)
 
 	return newJobs, nil
 }
@@ -210,17 +382,20 @@ func (s *Scheduler) summarizeNewJobs(ctx context.Context, userID int64, newJobs 
 
 // notifyNewJobs sends a notification for each newly discovered job and marks
 // it as notified in the store. If no Notifier is configured it is a no-op.
-func (s *Scheduler) notifyNewJobs(ctx context.Context, userID int64, newJobs []models.Job) {
+// topic is the per-user ntfy topic; an empty topic causes Notify to skip silently.
+func (s *Scheduler) notifyNewJobs(ctx context.Context, userID int64, topic string, newJobs []models.Job) {
 	if s.notifier == nil {
 		return
 	}
 	for _, job := range newJobs {
-		if err := s.notifier.Notify(ctx, job); err != nil {
+		if err := s.notifier.Notify(ctx, job, topic); err != nil {
 			s.logger.Error("failed to send notification", "job_id", job.ID, "error", err)
 			continue
 		}
-		if err := s.store.UpdateJobStatus(ctx, userID, job.ID, models.StatusNotified); err != nil {
-			s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
+		if topic != "" {
+			if err := s.store.UpdateJobStatus(ctx, userID, job.ID, models.StatusNotified); err != nil {
+				s.logger.Error("failed to update job status to notified", "job_id", job.ID, "error", err)
+			}
 		}
 	}
 }

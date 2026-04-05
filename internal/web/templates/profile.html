@@ -6,13 +6,13 @@
 <h1>Your Profile</h1>
 
 {{if .Saved}}
-<div role="alert" style="background:#e8f5e9;color:#2e7d32;padding:0.75rem 1rem;border-radius:0.3em;margin-bottom:1rem;">
+<div role="alert" class="alert alert-success">
   Profile saved.
 </div>
 {{end}}
 
 {{if .Error}}
-<div role="alert" style="background:#ffebee;color:#b71c1c;padding:0.75rem 1rem;border-radius:0.3em;margin-bottom:1rem;">
+<div role="alert" class="alert alert-danger">
   {{.Error}}
 </div>
 {{end}}
@@ -22,11 +22,11 @@
   <h2>Display Name</h2>
   <form method="POST" action="/profile">
     <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
-    <div style="display:flex;gap:0.5rem;align-items:end;max-width:480px;">
-      <label style="flex:1;margin-bottom:0;">
-        Display name
-        <input type="text" name="display_name" value="{{.User.DisplayName}}" maxlength="100" required>
-      </label>
+    <div class="inline-form">
+      <div class="inline-form-field">
+        <label for="display_name">Display name</label>
+        <input type="text" id="display_name" name="display_name" value="{{.User.DisplayName}}" maxlength="100" required>
+      </div>
       <button type="submit">Save</button>
     </div>
   </form>
@@ -38,7 +38,7 @@
   <h2>Connected Account</h2>
   {{if .User.AvatarURL}}
   <p>
-    <img src="{{.User.AvatarURL}}" alt="Avatar" style="width:48px;height:48px;border-radius:50%;vertical-align:middle;margin-right:0.5rem;">
+    <img src="{{.User.AvatarURL}}" alt="Avatar" class="avatar">
   </p>
   {{end}}
   <p>

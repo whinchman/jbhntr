@@ -14,7 +14,7 @@ import (
 
 // Notifier is the interface for sending job notifications.
 type Notifier interface {
-	Notify(ctx context.Context, job models.Job) error
+	Notify(ctx context.Context, job models.Job, topic string) error
 }
 
 // ntfyPayload is the JSON body sent to ntfy.sh.
@@ -29,26 +29,28 @@ type ntfyPayload struct {
 // NtfyNotifier sends push notifications via ntfy.sh.
 type NtfyNotifier struct {
 	server  string
-	topic   string
 	baseURL string
 	client  *http.Client
 }
 
 // NewNtfyNotifier creates a NtfyNotifier.
 // server is the ntfy server base URL (e.g. "https://ntfy.sh"),
-// topic is the ntfy topic name,
 // baseURL is the jobhuntr web dashboard base URL used to build the click link.
-func NewNtfyNotifier(server, topic, baseURL string) *NtfyNotifier {
+func NewNtfyNotifier(server, baseURL string) *NtfyNotifier {
 	return &NtfyNotifier{
 		server:  server,
-		topic:   topic,
 		baseURL: baseURL,
 		client:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// Notify sends a push notification for the given job.
-func (n *NtfyNotifier) Notify(ctx context.Context, job models.Job) error {
+// Notify sends a push notification for the given job to the given ntfy topic.
+// If topic is empty, Notify is a no-op and returns nil.
+func (n *NtfyNotifier) Notify(ctx context.Context, job models.Job, topic string) error {
+	if topic == "" {
+		return nil
+	}
+
 	msg := job.Location
 	if job.Salary != "" {
 		msg += " · " + job.Salary
@@ -67,7 +69,7 @@ func (n *NtfyNotifier) Notify(ctx context.Context, job models.Job) error {
 		return fmt.Errorf("notifier: marshal payload: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/%s", n.server, n.topic)
+	url := fmt.Sprintf("%s/%s", n.server, topic)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("notifier: build request: %w", err)

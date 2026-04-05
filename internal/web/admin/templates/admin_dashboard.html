@@ -1,0 +1,23 @@
+{{define "title"}}Admin Dashboard — JobHuntr{{end}}
+
+{{define "content"}}
+<h1>Admin Dashboard</h1>
+<div class="grid">
+  <article>
+    <header>Total Users</header>
+    <p><strong>{{.Stats.TotalUsers}}</strong></p>
+  </article>
+  <article>
+    <header>Total Jobs</header>
+    <p><strong>{{.Stats.TotalJobs}}</strong></p>
+  </article>
+  <article>
+    <header>Total Filters</header>
+    <p><strong>{{.Stats.TotalFilters}}</strong></p>
+  </article>
+  <article>
+    <header>New Users (Last 7d)</header>
+    <p><strong>{{.Stats.NewUsersLast7d}}</strong></p>
+  </article>
+</div>
+{{end}}

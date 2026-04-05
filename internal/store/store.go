@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/whinchman/jobhuntr/internal/models"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/whinchman/jobhuntr/internal/models"
 )
 
 // Store wraps a PostgreSQL database connection.
@@ -32,12 +32,15 @@ type ScrapeRun struct {
 
 // ListJobsFilter controls which jobs ListJobs returns.
 type ListJobsFilter struct {
-	Status models.JobStatus
-	Search string
-	Limit  int
-	Offset int
-	Sort   string // column name (must be validated by caller)
-	Order  string // "asc" or "desc" (must be validated by caller)
+	Status            models.JobStatus
+	ApplicationStatus models.ApplicationStatus
+	ExcludeStatuses   []models.JobStatus // omits jobs with any of these statuses
+	Search            string
+	BannedTerms       []string // excludes jobs matching any term (case-insensitive substring)
+	Limit             int
+	Offset            int
+	Sort              string // column name (must be validated by caller)
+	Order             string // "asc" or "desc" (must be validated by caller)
 }
 
 const schema = `
@@ -78,13 +81,50 @@ CREATE TABLE IF NOT EXISTS scrape_runs (
 );
 `
 
+// AdminStats holds site-wide aggregate counts used by the admin dashboard.
+type AdminStats struct {
+	TotalUsers     int
+	TotalJobs      int
+	TotalFilters   int
+	NewUsersLast7d int
+}
+
+// GetAdminStats returns site-wide aggregate counts via four scalar queries.
+func (s *Store) GetAdminStats(ctx context.Context) (AdminStats, error) {
+	var st AdminStats
+
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&st.TotalUsers); err != nil {
+		return st, fmt.Errorf("store: admin stats total users: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs").Scan(&st.TotalJobs); err != nil {
+		return st, fmt.Errorf("store: admin stats total jobs: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_search_filters").Scan(&st.TotalFilters); err != nil {
+		return st, fmt.Errorf("store: admin stats total filters: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '7 days'").Scan(&st.NewUsersLast7d); err != nil {
+		return st, fmt.Errorf("store: admin stats new users last 7d: %w", err)
+	}
+
+	return st, nil
+}
+
 // validTransitions maps each status to the set of statuses it may transition to.
 var validTransitions = map[models.JobStatus][]models.JobStatus{
-	models.StatusDiscovered: {models.StatusNotified, models.StatusRejected},
+	models.StatusDiscovered: {models.StatusNotified, models.StatusApproved, models.StatusRejected},
 	models.StatusNotified:   {models.StatusApproved, models.StatusRejected},
 	models.StatusApproved:   {models.StatusGenerating},
 	models.StatusGenerating: {models.StatusComplete, models.StatusFailed},
-	models.StatusFailed:     {models.StatusGenerating},
+	models.StatusFailed:     {models.StatusGenerating, models.StatusApproved},
+}
+
+// pipelineStatuses is the set of job statuses for which UpdateApplicationStatus
+// is permitted (approved, generating, complete, failed).
+var pipelineStatuses = map[models.JobStatus]bool{
+	models.StatusApproved:   true,
+	models.StatusGenerating: true,
+	models.StatusComplete:   true,
+	models.StatusFailed:     true,
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the baseline schema,
@@ -122,19 +162,21 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// CreateJob inserts a job record, ignoring duplicates (UNIQUE user_id+external_id+source).
+// CreateJob inserts a job record, ignoring duplicates on either the
+// (user_id, external_id, source) unique constraint or the partial
+// (user_id, dedup_hash) unique index (when dedup_hash is non-empty).
 // Returns inserted=true if a new row was created, false if it already existed.
 func (s *Store) CreateJob(ctx context.Context, userID int64, job *models.Job) (bool, error) {
 	now := time.Now().UTC()
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO jobs
-		  (user_id, external_id, source, title, company, location, description, salary, apply_url, status, discovered_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (user_id, external_id, source) DO NOTHING
+		  (user_id, external_id, source, title, company, location, description, salary, apply_url, status, dedup_hash, discovered_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		ON CONFLICT DO NOTHING
 		RETURNING id`,
 		userID, job.ExternalID, job.Source, job.Title, job.Company, job.Location,
-		job.Description, job.Salary, job.ApplyURL, string(job.Status),
+		job.Description, job.Salary, job.ApplyURL, string(job.Status), job.DedupHash,
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 	).Scan(&id)
 	if err != nil {
@@ -156,7 +198,8 @@ func (s *Store) CreateJob(ctx context.Context, userID int64, job *models.Job) (b
 // the job must belong to that user.
 func (s *Store) GetJob(ctx context.Context, userID int64, id int64) (*models.Job, error) {
 	q := `SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url,
-	             status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg,
+	             status, summary, extracted_salary, resume_html, cover_html, resume_markdown, cover_markdown, resume_pdf, cover_pdf, error_msg,
+	             dedup_hash, application_status, applied_at, interviewing_at, lost_at, won_at,
 	             discovered_at, updated_at
 	      FROM jobs WHERE id = $1`
 	args := []any{id}
@@ -195,14 +238,36 @@ func (s *Store) ListJobs(ctx context.Context, userID int64, f ListJobsFilter) ([
 		args = append(args, string(f.Status))
 		argN++
 	}
+	if f.ApplicationStatus != "" {
+		where = append(where, fmt.Sprintf("application_status = $%d", argN))
+		args = append(args, string(f.ApplicationStatus))
+		argN++
+	}
 	if f.Search != "" {
 		where = append(where, fmt.Sprintf("(title ILIKE $%d OR company ILIKE $%d OR description ILIKE $%d)", argN, argN+1, argN+2))
 		like := "%" + f.Search + "%"
 		args = append(args, like, like, like)
 		argN += 3
 	}
+	for _, t := range f.BannedTerms {
+		like := "%" + t + "%"
+		where = append(where, fmt.Sprintf(
+			"(title NOT ILIKE $%d AND company NOT ILIKE $%d AND description NOT ILIKE $%d)",
+			argN, argN+1, argN+2))
+		args = append(args, like, like, like)
+		argN += 3
+	}
+	if len(f.ExcludeStatuses) > 0 {
+		placeholders := make([]string, len(f.ExcludeStatuses))
+		for i, st := range f.ExcludeStatuses {
+			placeholders[i] = fmt.Sprintf("$%d", argN)
+			args = append(args, string(st))
+			argN++
+		}
+		where = append(where, "status NOT IN ("+strings.Join(placeholders, ", ")+")")
+	}
 
-	q := "SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url, status, summary, extracted_salary, resume_html, cover_html, resume_pdf, cover_pdf, error_msg, discovered_at, updated_at FROM jobs"
+	q := "SELECT id, user_id, external_id, source, title, company, location, description, salary, apply_url, status, summary, extracted_salary, resume_html, cover_html, resume_markdown, cover_markdown, resume_pdf, cover_pdf, error_msg, dedup_hash, application_status, applied_at, interviewing_at, lost_at, won_at, discovered_at, updated_at FROM jobs"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -276,6 +341,43 @@ func (s *Store) UpdateJobStatus(ctx context.Context, userID int64, id int64, new
 	return nil
 }
 
+// UpdateApplicationStatus sets the application_status for a job, stamping the
+// corresponding *_at timestamp using COALESCE so re-selecting the same status
+// does not overwrite the original timestamp.
+//
+// The job must belong to userID and its pipeline Status must be one of
+// approved, generating, complete, or failed — otherwise an error is returned.
+func (s *Store) UpdateApplicationStatus(ctx context.Context, userID int64, jobID int64, status models.ApplicationStatus) error {
+	if !status.Valid() {
+		return fmt.Errorf("store: invalid application status %q", status)
+	}
+
+	job, err := s.GetJob(ctx, userID, jobID)
+	if err != nil {
+		return err
+	}
+
+	if !pipelineStatuses[job.Status] {
+		return fmt.Errorf("store: cannot set application status on job with pipeline status %q (must be approved, generating, complete, or failed)", job.Status)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE jobs SET
+		  application_status  = $1,
+		  applied_at          = CASE WHEN $1 = 'applied'      THEN COALESCE(applied_at, NOW())      ELSE applied_at      END,
+		  interviewing_at     = CASE WHEN $1 = 'interviewing' THEN COALESCE(interviewing_at, NOW()) ELSE interviewing_at END,
+		  lost_at             = CASE WHEN $1 = 'lost'         THEN COALESCE(lost_at, NOW())         ELSE lost_at         END,
+		  won_at              = CASE WHEN $1 = 'won'          THEN COALESCE(won_at, NOW())          ELSE won_at          END,
+		  updated_at          = NOW()
+		WHERE id = $2 AND user_id = $3`,
+		string(status), jobID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update application status: %w", err)
+	}
+	return nil
+}
+
 // UpdateJobSummary sets the AI-generated summary and extracted salary on a job.
 // When userID is 0 the update is not scoped by user (worker path).
 func (s *Store) UpdateJobSummary(ctx context.Context, userID int64, id int64, summary, extractedSalary string) error {
@@ -314,21 +416,44 @@ func (s *Store) UpdateJobError(ctx context.Context, userID int64, id int64, errM
 	return nil
 }
 
-// UpdateJobGenerated sets the generated HTML and PDF paths on a job.
+// UpdateJobGenerated sets the generated HTML, Markdown, and PDF paths on a job.
 // When userID is 0 the update is not scoped by user (worker path).
-func (s *Store) UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumePDF, coverPDF string) error {
+func (s *Store) UpdateJobGenerated(ctx context.Context, userID int64, id int64, resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF string) error {
 	var q string
 	var args []any
 	if userID != 0 {
-		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_pdf=$3, cover_pdf=$4, updated_at=$5 WHERE id=$6 AND user_id=$7"
-		args = []any{resumeHTML, coverHTML, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id, userID}
+		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_markdown=$3, cover_markdown=$4, resume_pdf=$5, cover_pdf=$6, updated_at=$7 WHERE id=$8 AND user_id=$9"
+		args = []any{resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id, userID}
 	} else {
-		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_pdf=$3, cover_pdf=$4, updated_at=$5 WHERE id=$6"
-		args = []any{resumeHTML, coverHTML, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id}
+		q = "UPDATE jobs SET resume_html=$1, cover_html=$2, resume_markdown=$3, cover_markdown=$4, resume_pdf=$5, cover_pdf=$6, updated_at=$7 WHERE id=$8"
+		args = []any{resumeHTML, coverHTML, resumeMarkdown, coverMarkdown, resumePDF, coverPDF, time.Now().UTC().Format(time.RFC3339), id}
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("store: update job generated: %w", err)
+	}
+	return nil
+}
+
+// RetryJob transitions a failed job back to approved and clears its error
+// message. Returns an error if the job is not found, does not belong to
+// userID, or is not in the failed status.
+func (s *Store) RetryJob(ctx context.Context, userID int64, jobID int64) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'approved', error_msg = '', updated_at = NOW()
+		WHERE id = $1 AND user_id = $2 AND status = 'failed'`,
+		jobID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("store: retry job: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: retry job rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("store: job not found, does not belong to user, or is not in failed status")
 	}
 	return nil
 }
@@ -359,6 +484,7 @@ type scanner interface {
 func scanJob(s scanner) (*models.Job, error) {
 	var job models.Job
 	var status string
+	var appStatus sql.NullString
 	var discoveredAt, updatedAt string
 
 	err := s.Scan(
@@ -366,8 +492,9 @@ func scanJob(s scanner) (*models.Job, error) {
 		&job.Title, &job.Company, &job.Location,
 		&job.Description, &job.Salary, &job.ApplyURL,
 		&status, &job.Summary, &job.ExtractedSalary,
-		&job.ResumeHTML, &job.CoverHTML, &job.ResumePDF, &job.CoverPDF,
-		&job.ErrorMsg,
+		&job.ResumeHTML, &job.CoverHTML, &job.ResumeMarkdown, &job.CoverMarkdown, &job.ResumePDF, &job.CoverPDF,
+		&job.ErrorMsg, &job.DedupHash,
+		&appStatus, &job.AppliedAt, &job.InterviewingAt, &job.LostAt, &job.WonAt,
 		&discoveredAt, &updatedAt,
 	)
 	if err != nil {
@@ -375,6 +502,9 @@ func scanJob(s scanner) (*models.Job, error) {
 	}
 
 	job.Status = models.JobStatus(status)
+	if appStatus.Valid {
+		job.ApplicationStatus = models.ApplicationStatus(appStatus.String)
+	}
 
 	if t, err := time.Parse(time.RFC3339, discoveredAt); err == nil {
 		job.DiscoveredAt = t

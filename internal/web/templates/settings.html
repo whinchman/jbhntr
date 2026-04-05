@@ -6,7 +6,7 @@
 <h1>Settings</h1>
 
 {{if .Saved}}
-<div role="alert" style="background:#e8f5e9;color:#2e7d32;padding:0.75rem 1rem;border-radius:0.3em;margin-bottom:1rem;">
+<div role="alert" class="alert alert-success">
   Settings saved.
 </div>
 {{end}}
@@ -29,26 +29,25 @@
       <tr>
         <td>{{$f.Keywords}}</td>
         <td>{{if $f.Location}}{{$f.Location}}{{else}}—{{end}}</td>
-        <td>{{if $f.MinSalary}}${{$f.MinSalary}}{{else}}—{{end}}</td>
+        <td>{{if $f.MinSalary}}{{commaDollars $f.MinSalary}}{{else}}—{{end}}</td>
         <td>
           <button hx-post="/settings/filters/remove?id={{$f.ID}}"
                   hx-target="body"
                   hx-push-url="true"
-                  class="outline secondary"
-                  style="padding:0.2em 0.6em;font-size:0.8em;">Remove</button>
+                  class="outline secondary btn-sm">Remove</button>
         </td>
       </tr>
       {{end}}
     </tbody>
   </table>
   {{else}}
-  <p style="color:#999;">No search filters configured.</p>
+  <p class="text-muted">No search filters configured.</p>
   {{end}}
 
   <h3>Add Filter</h3>
   <form method="POST" action="/settings/filters">
     <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;align-items:end;">
+    <div class="filter-form-grid">
       <label>
         Keywords
         <input type="text" name="keywords" placeholder="e.g. senior golang engineer" required>
@@ -59,10 +58,74 @@
       </label>
       <label>
         Min Salary
-        <input type="number" name="min_salary" placeholder="e.g. 150000" min="0">
+        <div class="input-currency">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" name="min_salary" placeholder="150,000">
+        </div>
       </label>
       <button type="submit">Add</button>
     </div>
+  </form>
+</section>
+
+<hr>
+
+<section>
+  <h2>Banned Keywords &amp; Companies</h2>
+  <p class="text-muted">Jobs whose title, company, or description contain any of
+     these terms will be hidden from your results.</p>
+
+  {{if .BannedTerms}}
+  <table>
+    <thead>
+      <tr><th>Term</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{range $t := .BannedTerms}}
+      <tr>
+        <td>{{$t.Term}}</td>
+        <td>
+          <button hx-post="/settings/banned-terms/remove?id={{$t.ID}}"
+                  hx-target="body"
+                  hx-push-url="true"
+                  class="outline secondary btn-sm">Remove</button>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="text-muted">No banned terms configured.</p>
+  {{end}}
+
+  <h3>Add Banned Term</h3>
+  <form method="POST" action="/settings/banned-terms">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+    <div class="filter-form-grid">
+      <label>
+        Term
+        <input type="text" name="term" placeholder="e.g. Contractor, Staffing Agency" required>
+      </label>
+      <button type="submit">Add</button>
+    </div>
+  </form>
+</section>
+
+<hr>
+
+<section>
+  <h2>Notifications</h2>
+  <form method="POST" action="/settings/ntfy">
+    <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
+    <label>
+      NTFY Topic
+      <input type="text" name="ntfy_topic" value="{{.NtfyTopic}}" placeholder="e.g. jobhuntr-yourname">
+    </label>
+    <small class="field-hint">
+      Your <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a> topic name.
+      Subscribe to this topic in the ntfy app to receive push notifications for new jobs.
+      Leave blank to disable notifications.
+    </small>
+    <button type="submit">Save Notifications</button>
   </form>
 </section>
 
@@ -74,7 +137,7 @@
     <input type="hidden" name="gorilla.csrf.Token" value="{{.CSRFToken}}">
     <label>
       Resume content (Markdown)
-      <textarea name="resume" rows="20" style="font-family:monospace;font-size:0.9em;">{{.Resume}}</textarea>
+      <textarea name="resume" rows="20" class="mono">{{.Resume}}</textarea>
     </label>
     <button type="submit">Save Resume</button>
   </form>

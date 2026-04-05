@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/whinchman/jobhuntr/internal/config"
 	"github.com/whinchman/jobhuntr/internal/generator"
+	"github.com/whinchman/jobhuntr/internal/mailer"
 	"github.com/whinchman/jobhuntr/internal/notifier"
 	"github.com/whinchman/jobhuntr/internal/pdf"
 	"github.com/whinchman/jobhuntr/internal/scraper"
@@ -36,12 +38,22 @@ func main() {
 
 	dsn := cfg.Database.URL
 	if dsn == "" {
+		dsn = os.Getenv("DATABASE_URL")
+	}
+	if dsn == "" {
 		slog.Error("database.url is not set in config; set DATABASE_URL environment variable")
 		os.Exit(1)
 	}
 
-	fmt.Printf("jobhuntr starting on :%d\n", cfg.Server.Port)
-	slog.Info("jobhuntr starting", "port", cfg.Server.Port, "base_url", cfg.Server.BaseURL)
+	port := cfg.Server.Port
+	if p := os.Getenv("PORT"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil {
+			port = n
+		}
+	}
+
+	fmt.Printf("jobhuntr starting on :%d\n", port)
+	slog.Info("jobhuntr starting", "port", port, "base_url", cfg.Server.BaseURL)
 
 	db, err := store.Open(dsn)
 	if err != nil {
@@ -56,11 +68,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	src := scraper.NewSerpAPISource(cfg.Scraper.SerpAPIKey)
-	ntfyNotifier := notifier.NewNtfyNotifier(cfg.Ntfy.Server, cfg.Ntfy.Topic, cfg.Server.BaseURL)
+	var sources []scraper.Source
+	if cfg.Scraper.SerpAPIKey != "" && isEnabled(cfg.Scraper.EnabledSources, "serpapi") {
+		sources = append(sources, scraper.NewSerpAPISource(cfg.Scraper.SerpAPIKey))
+	}
+	if cfg.Scraper.JSearchKey != "" && isEnabled(cfg.Scraper.EnabledSources, "jsearch") {
+		sources = append(sources, scraper.NewJSearchSource(cfg.Scraper.JSearchKey))
+	}
+	if len(sources) == 0 {
+		slog.Warn("no job sources configured — scraper will be idle")
+	}
+	ntfyNotifier := notifier.NewNtfyNotifier(cfg.Ntfy.Server, cfg.Server.BaseURL)
 	summarizer := generator.NewAnthropicSummarizer(cfg.Claude.APIKey, "")
-	sched := scraper.NewScheduler(src, db, db, interval, logger).
+	sched := scraper.NewScheduler(sources, db, db, interval, logger).
 		WithNotifier(ntfyNotifier).
+		WithUserReader(db).
 		WithSummarizer(summarizer)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -70,21 +92,42 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start PDF converter and background worker.
-	pdfConverter, err := pdf.NewRodConverter()
-	if err != nil {
-		slog.Error("failed to start PDF converter", "error", err)
-		os.Exit(1)
+	// PDF conversion is optional — if the converter fails to start (e.g. no
+	// browser available in the environment), we log a warning and continue
+	// with pdfConverter=nil so the worker skips PDF generation gracefully.
+	var pdfConverter pdf.Converter
+	if rc, err := pdf.NewRodConverter(); err != nil {
+		slog.Warn("pdf converter unavailable, PDF generation will be skipped", "error", err)
+	} else {
+		pdfConverter = rc
+		defer rc.Close()
 	}
-	defer pdfConverter.Close()
 
 	claudeGen := generator.NewAnthropicGenerator(cfg.Claude.APIKey, cfg.Claude.Model)
-	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, cfg.Resume.Path, 30*time.Second, logger)
+	worker := generator.NewWorker(db, claudeGen, pdfConverter, cfg.Output.Dir, 30*time.Second, logger)
+
+	// Construct and inject the mailer. Falls back to NoopMailer if SMTP is not configured.
+	var m web.EmailSender
+	if cfg.SMTP.Host != "" {
+		m = mailer.NewSMTPMailer(cfg.SMTP.Host, cfg.SMTP.Port, cfg.SMTP.Username, cfg.SMTP.Password, cfg.SMTP.From)
+	} else {
+		slog.Warn("SMTP not configured — emails will be dropped (NoopMailer)")
+		m = &mailer.NoopMailer{}
+	}
 
 	// Start HTTP server.
 	webSrv := web.NewServerWithConfig(db, db, db, cfg).
-		WithLastScrapeFn(sched.LastScrapeAt)
+		WithAdminStore(db).
+		WithStatsStore(db).
+		WithLastScrapeFn(sched.LastScrapeAt).
+		WithScrapeInterval(interval).
+		WithMailer(m)
+	// Wire Drive token store when Google Drive OAuth is configured.
+	if cfg.GoogleDrive.ClientID != "" {
+		webSrv.WithDriveTokenStore(db)
+	}
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:    fmt.Sprintf(":%d", port),
 		Handler: webSrv.Handler(),
 	}
 	go func() {
@@ -124,4 +167,18 @@ func main() {
 	wg.Wait()
 
 	slog.Info("jobhuntr stopped")
+}
+
+// isEnabled reports whether name is enabled in the sources list.
+// An empty or nil slice means all sources are enabled (backward-compatible default).
+func isEnabled(sources []string, name string) bool {
+	if len(sources) == 0 {
+		return true
+	}
+	for _, s := range sources {
+		if s == name {
+			return true
+		}
+	}
+	return false
 }

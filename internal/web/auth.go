@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/csrf"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
 
@@ -33,11 +34,11 @@ func UserFromContext(ctx context.Context) *models.User {
 }
 
 const (
-	sessionName      = "jobhuntr_session"
-	sessionUserID    = "user_id"
-	sessionMaxAge    = 30 * 24 * 60 * 60 // 30 days in seconds
-	oauthStateName   = "oauth_state"
-	sessionFlashKey  = "flash"
+	sessionName        = "jobhuntr_session"
+	sessionUserID      = "user_id"
+	sessionMaxAge      = 30 * 24 * 60 * 60 // 30 days in seconds
+	oauthStateName     = "oauth_state"
+	sessionFlashKey    = "flash"
 	sessionReturnToKey = "return_to"
 )
 
@@ -208,9 +209,12 @@ func generateState() (string, error) {
 type loginData struct {
 	// Providers is the list of OAuth provider names that are configured and
 	// available for login (e.g. "google", "github").
-	Providers []string
+	Providers    []string
 	// Flash is a one-shot error or info message to display. Empty means no alert.
-	Flash string
+	Flash        string
+	FlashSuccess string
+	CSRFToken    string
+	Email        string // pre-fill email on validation error
 }
 
 // handleLogin renders the login page with OAuth provider buttons.
@@ -232,7 +236,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	flash := s.consumeFlash(w, r)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.loginTmpl.ExecuteTemplate(w, "login.html", loginData{Providers: providers, Flash: flash}); err != nil {
+	if err := s.loginTmpl.ExecuteTemplate(w, "login.html", loginData{
+		Providers: providers,
+		Flash:     flash,
+		CSRFToken: csrf.Token(r),
+	}); err != nil {
 		slog.Error("login template render error", "error", err)
 	}
 }
@@ -334,6 +342,12 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("failed to upsert user", "provider", providerName, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if dbUser.BannedAt != nil {
+		s.setFlash(w, r, "Your account has been suspended.")
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 
@@ -526,6 +540,12 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 					}
 				}
 			}
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		if user.BannedAt != nil {
+			s.clearSession(w, r)
+			s.setFlash(w, r, "Your account has been suspended.")
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}

@@ -18,6 +18,10 @@ database:
 scraper:
   interval: "1h"
   serpapi_key: "${SERPAPI_KEY}"
+  jsearch_key: "${JSEARCH_KEY}"         # RapidAPI key for JSearch (jsearch.p.rapidapi.com)
+  enabled_sources:                      # optional; omit to enable all configured sources
+    - serpapi
+    - jsearch
 
 # DEPRECATED: search_filters is no longer used at runtime. Per-user search
 # filters are configured in the web UI (Settings page) and stored in the
@@ -28,15 +32,23 @@ scraper:
 #     min_salary: 150000
 
 ntfy:
-  topic: "${NTFY_TOPIC}"
   server: "https://ntfy.sh"
+  # Per-user ntfy topics are configured in the Settings page and stored in the database.
 
 claude:
   api_key: "${ANTHROPIC_API_KEY}"
   model: "claude-sonnet-4-20250514"
 
-resume:
-  path: "./resume.md"  # Fallback resume; per-user resumes are stored in the database
-
 output:
   dir: "./output"
+
+admin:
+  password: "${ADMIN_PASSWORD}"  # HTTP Basic Auth password for /admin panel; username is "admin"
+
+# google_drive is optional. When client_id is empty the Drive integration is
+# disabled and no Drive routes are registered. Register a project at
+# https://console.cloud.google.com/ and enable the Google Drive API to obtain
+# credentials.
+google_drive:
+  client_id: "${GOOGLE_DRIVE_CLIENT_ID}"
+  client_secret: "${GOOGLE_DRIVE_CLIENT_SECRET}"

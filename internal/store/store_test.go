@@ -222,6 +222,7 @@ func TestUpdateJobStatus(t *testing.T) {
 		ok   bool
 	}{
 		{models.StatusDiscovered, models.StatusNotified, true},
+		{models.StatusDiscovered, models.StatusApproved, true},
 		{models.StatusDiscovered, models.StatusRejected, true},
 		{models.StatusNotified, models.StatusApproved, true},
 		{models.StatusNotified, models.StatusRejected, true},
@@ -266,7 +267,7 @@ func TestUpdateJobGenerated(t *testing.T) {
 		job := sampleJob("gen-test", "serpapi")
 		s.CreateJob(ctx, 0, job)
 
-		err := s.UpdateJobGenerated(ctx, 0, job.ID, "<h1>Resume</h1>", "<h1>Cover</h1>", "/out/resume.pdf", "/out/cover.pdf")
+		err := s.UpdateJobGenerated(ctx, 0, job.ID, "<h1>Resume</h1>", "<h1>Cover</h1>", "# Resume MD", "# Cover MD", "/out/resume.pdf", "/out/cover.pdf")
 		if err != nil {
 			t.Fatalf("UpdateJobGenerated error = %v", err)
 		}
@@ -274,6 +275,12 @@ func TestUpdateJobGenerated(t *testing.T) {
 		got, _ := s.GetJob(ctx, 0, job.ID)
 		if got.ResumeHTML != "<h1>Resume</h1>" {
 			t.Errorf("ResumeHTML = %q", got.ResumeHTML)
+		}
+		if got.ResumeMarkdown != "# Resume MD" {
+			t.Errorf("ResumeMarkdown = %q", got.ResumeMarkdown)
+		}
+		if got.CoverMarkdown != "# Cover MD" {
+			t.Errorf("CoverMarkdown = %q", got.CoverMarkdown)
 		}
 		if got.ResumePDF != "/out/resume.pdf" {
 			t.Errorf("ResumePDF = %q", got.ResumePDF)
@@ -598,4 +605,167 @@ func TestOpen_Idempotent(t *testing.T) {
 	if gotJob.ExternalID != "idem-job" {
 		t.Errorf("ExternalID = %q, want idem-job", gotJob.ExternalID)
 	}
+}
+
+// ─── RetryJob ─────────────────────────────────────────────────────────────────
+
+func TestRetryJob(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	u1, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "retry-u1", Email: "retry1@test.com"})
+	u2, _ := s.UpsertUser(ctx, &models.User{Provider: "google", ProviderID: "retry-u2", Email: "retry2@test.com"})
+
+	t.Run("happy path: failed job transitions to approved and clears error_msg", func(t *testing.T) {
+		j := sampleJob("retry-happy", "serpapi")
+		inserted, err := s.CreateJob(ctx, u1.ID, j)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		if !inserted {
+			t.Fatal("CreateJob returned false, want true")
+		}
+		// set job to failed with an error message
+		s.UpdateJobError(ctx, u1.ID, j.ID, "generation failed: LLM timeout")
+
+		if err = s.RetryJob(ctx, u1.ID, j.ID); err != nil {
+			t.Fatalf("RetryJob error = %v", err)
+		}
+
+		got, err := s.GetJob(ctx, u1.ID, j.ID)
+		if err != nil {
+			t.Fatalf("GetJob error = %v", err)
+		}
+		if got.Status != models.StatusApproved {
+			t.Errorf("Status = %q, want approved", got.Status)
+		}
+		if got.ErrorMsg != "" {
+			t.Errorf("ErrorMsg = %q, want empty string", got.ErrorMsg)
+		}
+	})
+
+	t.Run("wrong user returns error", func(t *testing.T) {
+		j := sampleJob("retry-wronguser", "serpapi")
+		inserted, err := s.CreateJob(ctx, u1.ID, j)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		if !inserted {
+			t.Fatal("CreateJob returned false, want true")
+		}
+		s.UpdateJobError(ctx, u1.ID, j.ID, "some error")
+
+		if err = s.RetryJob(ctx, u2.ID, j.ID); err == nil {
+			t.Error("RetryJob should fail for wrong user")
+		}
+		// job should remain failed
+		got, _ := s.GetJob(ctx, u1.ID, j.ID)
+		if got.Status != models.StatusFailed {
+			t.Errorf("Status = %q, want failed (unchanged)", got.Status)
+		}
+	})
+
+	t.Run("wrong status returns error", func(t *testing.T) {
+		j := sampleJob("retry-wrongstatus", "serpapi")
+		inserted, err := s.CreateJob(ctx, u1.ID, j)
+		if err != nil {
+			t.Fatalf("CreateJob error = %v", err)
+		}
+		if !inserted {
+			t.Fatal("CreateJob returned false, want true")
+		}
+		// job is in 'discovered' status — not failed
+
+		if err = s.RetryJob(ctx, u1.ID, j.ID); err == nil {
+			t.Error("RetryJob should fail for non-failed job")
+		}
+	})
+
+	t.Run("non-existent job returns error", func(t *testing.T) {
+		err := s.RetryJob(ctx, u1.ID, 99999999)
+		if err == nil {
+			t.Error("RetryJob should fail for non-existent job")
+		}
+	})
+}
+
+// ─── ListJobs ExcludeStatuses ─────────────────────────────────────────────────
+
+func TestListJobs_ExcludeStatuses(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	// Create a user to scope the jobs.
+	u := &models.User{Email: "excludestatuses@example.com", PasswordHash: "x"}
+	if err := s.CreateUser(ctx, u); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Insert a discovered job.
+	discovered := &models.Job{
+		ExternalID: "excl-disc-1", Source: "serpapi",
+		Title: "Discovered Job", Company: "C1", Location: "Remote",
+		Status: models.StatusDiscovered,
+	}
+	if _, err := s.CreateJob(ctx, u.ID, discovered); err != nil {
+		t.Fatalf("CreateJob (discovered): %v", err)
+	}
+
+	// Insert a rejected job.
+	rejected := &models.Job{
+		ExternalID: "excl-rej-1", Source: "serpapi",
+		Title: "Rejected Job", Company: "C2", Location: "Remote",
+		Status: models.StatusDiscovered, // must start as discovered
+	}
+	if _, err := s.CreateJob(ctx, u.ID, rejected); err != nil {
+		t.Fatalf("CreateJob (rejected-seed): %v", err)
+	}
+	if err := s.UpdateJobStatus(ctx, u.ID, rejected.ID, models.StatusRejected); err != nil {
+		t.Fatalf("UpdateJobStatus→rejected: %v", err)
+	}
+
+	t.Run("excludes rejected jobs when ExcludeStatuses is set", func(t *testing.T) {
+		jobs, err := s.ListJobs(ctx, u.ID, ListJobsFilter{
+			ExcludeStatuses: []models.JobStatus{models.StatusRejected},
+		})
+		if err != nil {
+			t.Fatalf("ListJobs: %v", err)
+		}
+		for _, j := range jobs {
+			if j.ID == rejected.ID {
+				t.Errorf("rejected job (id=%d) appeared in results when ExcludeStatuses=[rejected]", rejected.ID)
+			}
+		}
+		found := false
+		for _, j := range jobs {
+			if j.ID == discovered.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("discovered job was not returned when ExcludeStatuses=[rejected]")
+		}
+	})
+
+	t.Run("returns all jobs including rejected when ExcludeStatuses is empty", func(t *testing.T) {
+		jobs, err := s.ListJobs(ctx, u.ID, ListJobsFilter{})
+		if err != nil {
+			t.Fatalf("ListJobs: %v", err)
+		}
+		var foundDiscovered, foundRejected bool
+		for _, j := range jobs {
+			if j.ID == discovered.ID {
+				foundDiscovered = true
+			}
+			if j.ID == rejected.ID {
+				foundRejected = true
+			}
+		}
+		if !foundDiscovered {
+			t.Error("discovered job missing from unfiltered ListJobs")
+		}
+		if !foundRejected {
+			t.Error("rejected job missing from unfiltered ListJobs (baseline should be unaffected)")
+		}
+	})
 }

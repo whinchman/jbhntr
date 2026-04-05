@@ -30,7 +30,7 @@ func TestQA_Scheduler_UserWithFiltersNoJobs(t *testing.T) {
 		},
 	}
 
-	sched := NewScheduler(src, ms, uf, time.Hour, nil)
+	sched := NewScheduler([]Source{src}, ms, uf, time.Hour, nil)
 	newJobs, err := sched.RunOnce(ctx)
 
 	if err != nil {
@@ -65,7 +65,7 @@ func TestQA_Scheduler_EmptyActiveUsers(t *testing.T) {
 		filters: map[int64][]models.UserSearchFilter{},
 	}
 
-	sched := NewScheduler(src, ms, uf, time.Hour, nil)
+	sched := NewScheduler([]Source{src}, ms, uf, time.Hour, nil)
 	newJobs, err := sched.RunOnce(ctx)
 
 	if err != nil {
@@ -109,7 +109,7 @@ func TestQA_Scheduler_SameJobThreeUsers(t *testing.T) {
 		},
 	}
 
-	sched := NewScheduler(src, ms, uf, time.Hour, nil)
+	sched := NewScheduler([]Source{src}, ms, uf, time.Hour, nil)
 	newJobs, err := sched.RunOnce(ctx)
 
 	if err != nil {
@@ -159,7 +159,7 @@ func TestQA_Scheduler_DeletedUserWithFilters(t *testing.T) {
 		},
 	}
 
-	sched := NewScheduler(src, ms, uf, time.Hour, nil)
+	sched := NewScheduler([]Source{src}, ms, uf, time.Hour, nil)
 	newJobs, err := sched.RunOnce(ctx)
 
 	if err != nil {
@@ -207,7 +207,7 @@ func TestQA_Scheduler_MultipleUsersPartialFailure(t *testing.T) {
 		},
 	}
 
-	sched := NewScheduler(src2, ms, uf, time.Hour, nil)
+	sched := NewScheduler([]Source{src2}, ms, uf, time.Hour, nil)
 	newJobs, err := sched.RunOnce(ctx)
 
 	if err != nil {
@@ -264,6 +264,8 @@ type mockSourceWithErrors struct {
 	callResults []mockCallResult
 	callIndex   int
 }
+
+func (m *mockSourceWithErrors) Name() string { return "mock-errors" }
 
 func (m *mockSourceWithErrors) Search(_ context.Context, _ models.SearchFilter) ([]models.Job, error) {
 	if m.callIndex >= len(m.callResults) {

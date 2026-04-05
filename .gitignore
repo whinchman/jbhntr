@@ -1,11 +1,12 @@
+# Ignore files and directories that are not relevant to version control
 bin/
+tmp/
 output/
 *.db
 *.db-wal
 *.db-shm
 .env
 worktrees/
-config.yaml
 worktrees/*
 !worktrees/.gitkeep
 tasks/*.log
@@ -18,3 +19,14 @@ Thumbs.db
 *~
 .vscode/
 .idea/
+
+# Ignore specific files and directories related to the workflow
+# WARNING : DO NOT MODIFY THESE ENTRIES UNLESS YOU ARE A HUMAN AND KNOW WHAT YOU ARE DOING. THESE ENTRIES ARE CRUCIAL FOR THE PROPER FUNCTIONING OF THE WORKFLOW.
+agent.yaml
+.workflow/bugimgs
+.workflow
+.workflow/*
+
+.workflow/worktrees/*
+!.workflow/worktrees/.gitkeep
+.workflow/container/docker-compose.yml
