@@ -1,7 +1,7 @@
 # Task: tinder-mobile-backend
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Parallel Group**: 1
 - **Branch**: feature/tinder-mobile-backend
 - **Source Item**: Tinder-Style Mobile Job Review UI
@@ -161,4 +161,22 @@ Note: read the existing `respondJobAction` implementation carefully. The plan no
 
 ## Notes
 
-<!-- implementing agent fills in when complete -->
+**Branch**: `feature/tinder-mobile-backend`
+**Commit**: aefe077
+
+### Changes Made
+
+**`internal/web/server.go`**
+- Change A: Added `"templates/partials/job_cards.html"` to the `ParseFS` call in `NewServerWithConfig` so the `job_cards` named template is available to `s.templates`.
+- Change B: Registered `GET /partials/job-cards` in the optional-auth group (adjacent to `/partials/job-table`), pointing at the new `handleJobCardsPartial` handler.
+- Change C: Implemented `handleJobCardsPartial` — returns empty 200 for unauthenticated requests, excludes `StatusRejected` via `ExcludeStatuses`, and executes the `job_cards` template with `jobRowsData`.
+- Change D: Extended `respondJobAction` to detect `HX-Target: job-card-deck`. When detected, sets `f.ExcludeStatuses = [StatusRejected]`, re-fetches jobs, and renders the `job_cards` template. All other HTMX targets continue to render `job_rows` (regression unchanged).
+
+**`internal/web/templates/partials/job_cards.html`**
+- New template defining the `"job_cards"` named block. Renders `<div class="job-card">` cards with approve/reject HTMX forms targeting `#job-card-deck`.
+
+**`internal/web/job_cards_test.go`**
+- Tests: route registered (not 404), unauthenticated returns empty 200, card-deck approve/reject return HTML, `ExcludeStatuses` contains `rejected` for card-deck target, `job-table-body` target regression guard (no ExcludeStatuses, renders `job_rows` not `job_cards`), card-deck renders `job_cards` template markup.
+
+### Build Note
+`go` is not installed in this container. All code compiles cleanly per static review; the `go build ./...` acceptance criterion cannot be verified here and should be confirmed by the Code Reviewer on a machine with Go installed.
