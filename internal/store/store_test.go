@@ -696,9 +696,9 @@ func TestListJobs_ExcludeStatuses(t *testing.T) {
 	s := openTestStore(t)
 
 	// Create a user to scope the jobs.
-	u := &models.User{Email: "excludestatuses@example.com", PasswordHash: "x"}
-	if err := s.CreateUser(ctx, u); err != nil {
-		t.Fatalf("CreateUser: %v", err)
+	u, err := s.CreateUserWithPassword(ctx, "excludestatuses@example.com", "Exclude Test", "hash", "tok", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("CreateUserWithPassword: %v", err)
 	}
 
 	// Insert a discovered job.

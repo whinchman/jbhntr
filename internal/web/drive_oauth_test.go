@@ -15,30 +15,6 @@ import (
 	"github.com/whinchman/jobhuntr/internal/web"
 )
 
-// ─── mock DriveTokenStore ────────────────────────────────────────────────────
-
-type mockDriveTokenStore struct {
-	tokens map[int64]string
-}
-
-func newMockDriveTokenStore() *mockDriveTokenStore {
-	return &mockDriveTokenStore{tokens: make(map[int64]string)}
-}
-
-func (m *mockDriveTokenStore) UpsertGoogleDriveToken(_ context.Context, userID int64, encryptedJSON string) error {
-	m.tokens[userID] = encryptedJSON
-	return nil
-}
-
-func (m *mockDriveTokenStore) GetGoogleDriveToken(_ context.Context, userID int64) (string, error) {
-	return m.tokens[userID], nil
-}
-
-func (m *mockDriveTokenStore) DeleteGoogleDriveToken(_ context.Context, userID int64) error {
-	delete(m.tokens, userID)
-	return nil
-}
-
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 // newDriveAuthConfig returns a config with both regular auth and Drive OAuth

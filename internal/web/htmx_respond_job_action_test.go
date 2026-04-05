@@ -70,6 +70,10 @@ func (s *spyJobStore) UpdateApplicationStatus(ctx context.Context, userID int64,
 	return s.inner.UpdateApplicationStatus(ctx, userID, id, status)
 }
 
+func (s *spyJobStore) RetryJob(ctx context.Context, userID int64, id int64) error {
+	return s.inner.RetryJob(ctx, userID, id)
+}
+
 func (s *spyJobStore) LastFilter() store.ListJobsFilter {
 	s.mu.Lock()
 	defer s.mu.Unlock()

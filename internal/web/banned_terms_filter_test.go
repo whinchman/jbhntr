@@ -87,7 +87,7 @@ func newFilterSpyServer(t *testing.T, bannedTerms []string, jobs ...*models.Job)
 	// Build a filter store pre-seeded with the user's banned terms.
 	fs := newMockFilterStore()
 	for _, term := range bannedTerms {
-		if err := fs.CreateUserBannedTerm(context.Background(), 42, term); err != nil {
+		if _, err := fs.CreateUserBannedTerm(context.Background(), 42, term); err != nil {
 			t.Fatalf("seed banned term %q: %v", term, err)
 		}
 	}
