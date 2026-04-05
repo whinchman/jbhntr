@@ -227,3 +227,51 @@ func TestRespondJobAction_CardDeck_RendersJobCardsTemplate(t *testing.T) {
 		t.Error("response contains <tr> — job_rows template was rendered instead of job_cards")
 	}
 }
+
+// TestRespondJobAction_CardDeck_Reject_RendersJobCardsTemplate verifies that
+// rejecting a job with HX-Target: job-card-deck renders the job_cards template
+// (not job_rows). This is the parallel of the approve test above for the reject
+// action, covering Acceptance Criterion 5 from tinder-mobile-qa.md.
+func TestRespondJobAction_CardDeck_Reject_RendersJobCardsTemplate(t *testing.T) {
+	ts, _ := newCardDeckServer(t,
+		htmxJob(1, models.StatusDiscovered),
+		htmxJob(2, models.StatusNotified),
+	)
+	defer ts.Close()
+
+	resp := doHTMXWithTarget(t, ts.Client(), ts.URL+"/api/jobs/1/reject", "job-card-deck")
+	body := readBody(t, resp)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", resp.StatusCode, body)
+	}
+
+	// job_cards template must be rendered (not job_rows).
+	if !strings.Contains(body, "job-card") {
+		t.Errorf("response does not contain 'job-card' markup after reject — job_cards template not executed; body: %.400s", body)
+	}
+	if strings.Contains(body, "<tr>") {
+		t.Error("response contains <tr> after reject with card-deck target — job_rows rendered instead of job_cards")
+	}
+}
+
+// TestHandleJobCardsPartial_ContentType verifies that the Content-Type header
+// for GET /partials/job-cards is text/html (unauthenticated path). This
+// supplements TestHandleJobCardsPartial_Unauthenticated which already checks
+// the body; this test explicitly asserts the Content-Type header is set
+// regardless of authentication state.
+func TestHandleJobCardsPartial_ContentType(t *testing.T) {
+	ts, _ := newCardDeckServer(t)
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL + "/partials/job-cards")
+	if err != nil {
+		t.Fatalf("GET /partials/job-cards: %v", err)
+	}
+	resp.Body.Close()
+
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
