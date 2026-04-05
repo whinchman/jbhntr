@@ -161,6 +161,39 @@ Note: read the existing `respondJobAction` implementation carefully. The plan no
 
 ## Notes
 
+**Code Review**: done (2026-04-05)
+**Verdict**: approve (1 warning, 2 info — no critical issues)
+
+---
+
+### Code Review Findings
+
+#### [WARNING] `internal/web/server.go` — `respondJobAction`: redundant ListJobs call for card-deck requests
+
+When `HX-Target == "job-card-deck"`, the code performs two `ListJobs` calls: the first at the top of the HTMX block (no `ExcludeStatuses`), and the second inside the card-deck branch (with `ExcludeStatuses = [rejected]`). The first call's result is thrown away. This is wasteful and slightly misleading — a reader might think the first result matters. The fix is to detect the card-deck header before the first `ListJobs` call and set `ExcludeStatuses` on `f` upfront. This is a performance/clarity issue, not a correctness bug; the rendered output is correct.
+
+Suggested fix: move the `HX-Target` check before the first `ListJobs` call, set `f.ExcludeStatuses` conditionally, then do a single `ListJobs` call, then branch on the target to choose the template.
+
+#### [INFO] `internal/web/job_cards_test.go` — `newCardDeckServer` uses `web.NewServer` which may not configure CSRF middleware
+
+The tests use `web.NewServer(spy)` (not `NewServerWithConfig`). If `NewServer` skips the CSRF middleware (likely, since there's no session config in tests), the `csrf.Token(r)` call in the handler will return an empty string. This is fine for tests — the CSRF token in the rendered HTML will be empty, not a security issue in a test context. The test assertions check for `"job-card"` markup, not the token value. No action needed.
+
+#### [INFO] `internal/web/templates/partials/job_cards.html` (backend branch version) — simplified template will be replaced by frontend branch
+
+The backend branch contains a simplified `job_cards.html` (36 lines, using `{{range .Jobs}}`) that acts as a functional stub for tests. The frontend branch contains the full spec-compliant version (126 lines with ghost cards, overlays, accessibility attributes, empty state). When the two branches are merged, the frontend version must win. The backend-branch stub is acceptable for its test purposes, but the integration must use the frontend version.
+
+#### [INFO] All acceptance criteria met
+
+- Change A (ParseFS): confirmed in diff.
+- Change B (route registration): confirmed in diff, placed correctly adjacent to `/partials/job-table`.
+- Change C (`handleJobCardsPartial`): unauthenticated returns empty 200, `ExcludeStatuses` set, template executed — all confirmed.
+- Change D (`respondJobAction`): `HX-Target: job-card-deck` detection correct (no `#` prefix), renders `job_cards`, sets `ExcludeStatuses`, regression path renders `job_rows` — all confirmed.
+- Tests cover: route registration, unauthenticated empty 200, card-deck approve/reject HTML, `ExcludeStatuses` filter assertion, regression guard for `job-table-body`.
+
+**Summary**: 0 critical, 1 warning (double DB call), 2 info. Core correctness is sound. `go build` cannot be verified in this container.
+
+---
+
 **Branch**: `feature/tinder-mobile-backend`
 **Commit**: aefe077
 

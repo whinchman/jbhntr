@@ -169,6 +169,48 @@ Note: `layout.html` already has a `{{block "scripts" .}}{{end}}` in `<body>`. Th
 
 ## Notes
 
+**Code Review**: done (2026-04-05)
+**Verdict**: approve (1 warning, 3 info — no critical issues)
+
+---
+
+### Code Review Findings
+
+#### [WARNING] `internal/web/templates/partials/job_cards.html` line 8–10 — Refresh button missing CSRF token for non-GET scenario (info-level but worth noting)
+
+The Refresh button uses `hx-get="/partials/job-cards"` which is a GET request and does not require CSRF protection per gorilla/csrf's defaults. The `X-CSRF-Token` header is set on `document.body` by `layout.html` JS, so HTMX GET requests will send it automatically. This is correct behavior — no action needed. Flagged as a warning only because the button has no `<form>` wrapper and relies entirely on HTMX; if JS is disabled the button does nothing. For a JS-progressive-enhancement context this is intentional and acceptable per the spec.
+
+#### [INFO] `internal/web/templates/dashboard.html` — `{{block "scripts" .}}` is placed outside the `{{if .User}}` block
+
+The `{{block "scripts" .}}` (which loads `swipe-cards.js`) is emitted for all visitors — authenticated and unauthenticated alike. For unauthenticated users the card deck section is absent from the DOM, so `initDeck()` will find no `.job-card-active` and exit harmlessly. The JS file is a small static asset. Not a bug; just noted.
+
+#### [INFO] `internal/web/templates/partials/job_cards.html` line 43 — `aria-label` on active card always says "Job 1 of N"
+
+The `aria-label` is hardcoded as `"Job 1 of {{len $.Jobs}}: ..."` regardless of position. Since the template always renders only the first job as the active card (the rest are ghost cards), this is technically accurate — but it would be misleading if someone expects "Job 2 of N" after a swap (the server re-renders from scratch with the first remaining job as active). This is a design consequence, not a bug. The spec says "Job 1 of N" and the template implements that correctly.
+
+#### [INFO] `internal/web/templates/static/swipe-cards.js` — `commitCard` does not pass `card` to `submitAction`
+
+`commitCard(card, direction)` calls `submitAction(direction)` without passing `card`. `submitAction` then searches `#job-card-deck` for `form[data-action="${direction}"]`. This works correctly because the active card's forms are inside `#job-card-deck`. If multiple jobs were rendered with forms, the selector would find the first matching form, which is always the active card's form (since only the active card's forms have `data-action`). No bug.
+
+#### [INFO] All acceptance criteria verified
+
+- `{{define "job_cards"}}` template: confirmed.
+- Empty state with Refresh button: confirmed (lines 2–11).
+- Job counter: confirmed (line 13).
+- Ghost cards (up to 2, aria-hidden, inert): confirmed.
+- Active card `<article class="job-card job-card-active">` with `data-job-id`, `tabindex="0"`, correct aria-label: confirmed.
+- Approve/reject overlay badges (aria-hidden): confirmed.
+- Status badge, title link, company, location (conditional), salary (ExtractedSalary→Salary), discovered date, summary+expand: confirmed.
+- Forms: `hx-target="#job-card-deck"` (no `#` issue — this is the correct HTMX value, the `#` is part of the CSS selector string used as the target value), `hx-swap="innerHTML"`, `data-action`, CSRF token: all confirmed.
+- `app.css` section 11 appended (no existing rules modified), breakpoints, all card classes from plan §5: confirmed.
+- `swipe-cards.js` IIFE, Pointer Events, correct thresholds (100px/35%/0.4px/ms), fly-off (±110vw, ±30deg), snap-back spring easing, `prefers-reduced-motion`, `htmx:afterSwap` on `#job-card-deck`, `DOMContentLoaded`: all confirmed.
+- `dashboard.html`: `job-table-desktop` class added, `<section id="job-card-deck">` inserted with correct attributes and `{{template "job_cards" .}}`, `{{block "scripts"}}` with `swipe-cards.js`: confirmed.
+- `{{template "job_cards" .}}` receives `dashboardData` which embeds `Jobs []models.Job` and `CSRFToken string` — the template only accesses `.Jobs` and `.CSRFToken`, both present in `dashboardData`. Confirmed compatible.
+
+**Summary**: 0 critical, 1 warning (info-level JS progressive enhancement note), 3 info. Frontend implementation is correct and complete against the spec.
+
+---
+
 **Completed by Coder agent — 2026-04-05**
 
 Branch: `feature/tinder-mobile-frontend`
