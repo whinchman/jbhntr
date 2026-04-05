@@ -1,0 +1,36 @@
+{{define "job_cards"}}
+{{range .Jobs}}
+<div class="job-card" data-job-id="{{.ID}}">
+  <div class="job-card-header">
+    <h3 class="job-card-title">{{.Title}}</h3>
+    <span class="job-card-company">{{.Company}}</span>
+  </div>
+  <div class="job-card-body">
+    <p class="job-card-location">{{.Location}}</p>
+    {{if .ExtractedSalary}}<p class="job-card-salary">{{.ExtractedSalary}}</p>{{else if .Salary}}<p class="job-card-salary">{{.Salary}}</p>{{end}}
+    {{if .Summary}}<p class="job-card-summary">{{.Summary}}</p>{{end}}
+  </div>
+  <div class="job-card-actions">
+    <form method="post"
+          action="/api/jobs/{{.ID}}/reject"
+          hx-post="/api/jobs/{{.ID}}/reject"
+          hx-target="#job-card-deck"
+          hx-swap="innerHTML">
+      <input type="hidden" name="gorilla.csrf.Token" value="{{$.CSRFToken}}">
+      <button type="submit" class="outline btn-card-action btn-reject">✕ Pass</button>
+    </form>
+    <a href="/jobs/{{.ID}}" class="outline btn-card-action btn-detail">Details</a>
+    <form method="post"
+          action="/api/jobs/{{.ID}}/approve"
+          hx-post="/api/jobs/{{.ID}}/approve"
+          hx-target="#job-card-deck"
+          hx-swap="innerHTML">
+      <input type="hidden" name="gorilla.csrf.Token" value="{{$.CSRFToken}}">
+      <button type="submit" class="outline contrast btn-card-action btn-approve">✓ Approve</button>
+    </form>
+  </div>
+</div>
+{{else}}
+<div class="job-card-empty">No jobs to review.</div>
+{{end}}
+{{end}}
