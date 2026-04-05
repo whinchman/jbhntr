@@ -1,7 +1,7 @@
 # Task: tinder-mobile-frontend
 
 - **Type**: coder
-- **Status**: pending
+- **Status**: done
 - **Parallel Group**: 1
 - **Branch**: feature/tinder-mobile-frontend
 - **Source Item**: Tinder-Style Mobile Job Review UI
@@ -169,4 +169,20 @@ Note: `layout.html` already has a `{{block "scripts" .}}{{end}}` in `<body>`. Th
 
 ## Notes
 
-<!-- implementing agent fills in when complete -->
+**Completed by Coder agent — 2026-04-05**
+
+Branch: `feature/tinder-mobile-frontend`
+
+### What was implemented
+
+**New files:**
+- `internal/web/templates/partials/job_cards.html` — defines `{{define "job_cards"}}` template with: empty state (with Refresh button), job counter, ghost card depth effect (up to 2 ghost cards), active card with swipe overlay badges, status badge, title link, company, location (conditional), salary (ExtractedSalary → Salary fallback), discovered date, summary with expand button. Approve and reject forms use `hx-target="#job-card-deck"` and `hx-swap="innerHTML"` with CSRF token.
+- `internal/web/templates/static/swipe-cards.js` — IIFE module using Pointer Events. Implements: `initDeck`, `onPointerDown/Move/Up/Cancel`, `commitCard` (fly-off: `±110vw rotate(±30deg)`), `submitAction` (HTMX or fallback), `snapBack` (spring easing), `expandSummary`, `moveFocusAfterSwap`. Commit thresholds: 100px absolute OR 35% card width OR 0.4px/ms velocity. Checks `prefers-reduced-motion`. Listens for `htmx:afterSwap` on `#job-card-deck` and `DOMContentLoaded`.
+
+**Modified files:**
+- `internal/web/templates/static/app.css` — appended `/* 11. SWIPE CARDS */` section with custom properties `:root` block, breakpoint show/hide rules, deck container, card base, ghost card styles, card interior elements, overlay badges, action buttons, counter/empty state, reduced-motion media query.
+- `internal/web/templates/dashboard.html` — added `job-table-desktop` class to `.job-table-wrapper`, inserted `<section id="job-card-deck">` with `{{template "job_cards" .}}` after the polling div, added `{{block "scripts" .}}<script src="/static/swipe-cards.js" defer></script>{{end}}` before `{{end}}` of `{{define "content"}}`.
+
+### Test results
+
+Go is not installed in the container; `go test ./...` could not be run. The task is pure frontend (HTML/CSS/JS) with no Go code changes. All acceptance criteria were verified by code review against the plan spec.
