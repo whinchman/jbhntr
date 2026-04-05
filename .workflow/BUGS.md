@@ -1,5 +1,23 @@
 # Bugs
 
+## [FIXED] `internal/web/server.go` — Card deck shows non-actionable jobs, approve button silently fails
+
+**Feature**: tinder-style-mobile
+**Severity**: bug (approve button appears broken)
+
+**Description**:
+Card deck `ExcludeStatuses` only excluded `rejected`, so `approved`, `generating`, `complete`, and `failed` jobs appeared in the deck. `handleApproveJob` rejects these with 409 Conflict. HTMX does not swap on non-200 responses, so the button appeared to do nothing.
+
+Also, `dashboard.html` passed the full job list (used by the desktop table) to `job_cards`, so the initial card deck render also showed non-actionable jobs.
+
+**Fix**:
+- Added `CardDeck jobRowsData` to `dashboardData` with a separate query excluding all non-actionable statuses
+- Updated `dashboard.html` to use `{{template "job_cards" .CardDeck}}`
+- Changed `handleJobCardsPartial` filter to exclude all non-actionable statuses
+- Changed `respondJobAction` card-deck branch to exclude all non-actionable statuses and clear any status filter from the URL
+
+---
+
 ## [WARNING] `internal/web/server.go` ~line 1211 — Double `ListJobs` call in `respondJobAction` for card-deck requests
 
 **Feature**: tinder-style-mobile

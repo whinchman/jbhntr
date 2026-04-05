@@ -548,6 +548,7 @@ func buildColumns(activeSort, activeOrder string) []columnDef {
 
 type dashboardData struct {
 	Jobs         []models.Job
+	CardDeck     jobRowsData
 	Statuses     []models.JobStatus
 	ActiveStatus string
 	Search       string
@@ -608,21 +609,43 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if jobs == nil {
 		jobs = []models.Job{}
 	}
+	cardF := store.ListJobsFilter{
+		Sort:        sort,
+		Order:       order,
+		BannedTerms: bannedTermStrings,
+		ExcludeStatuses: []models.JobStatus{
+			models.StatusRejected,
+			models.StatusApproved,
+			models.StatusGenerating,
+			models.StatusComplete,
+			models.StatusFailed,
+		},
+	}
+	cardJobs, err := s.store.ListJobs(r.Context(), userID, cardF)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list jobs")
+		return
+	}
+	if cardJobs == nil {
+		cardJobs = []models.Job{}
+	}
 	var nextScrape time.Time
 	if s.lastScrapeFn != nil && s.scrapeInterval > 0 {
 		if last := s.lastScrapeFn(); !last.IsZero() {
 			nextScrape = last.Add(s.scrapeInterval)
 		}
 	}
+	csrfToken := csrf.Token(r)
 	data := dashboardData{
 		Jobs:         jobs,
+		CardDeck:     jobRowsData{Jobs: cardJobs, CSRFToken: csrfToken},
 		Statuses:     dashboardStatuses,
 		ActiveStatus: string(f.Status),
 		Search:       f.Search,
 		Sort:         sort,
 		Order:        order,
 		Columns:      buildColumns(sort, order),
-		CSRFToken:    csrf.Token(r),
+		CSRFToken:    csrfToken,
 		User:         user,
 		NextScrapeAt: nextScrape,
 	}
@@ -691,12 +714,16 @@ func (s *Server) handleJobCardsPartial(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	sort, order := parseSortParams(q)
 	f := store.ListJobsFilter{
-		Status:          models.JobStatus(q.Get("status")),
-		ExcludeStatuses: []models.JobStatus{models.StatusRejected},
-		Search:          q.Get("q"),
-		Sort:            sort,
-		Order:           order,
-		BannedTerms:     bannedTermStrings,
+		Sort:        sort,
+		Order:       order,
+		BannedTerms: bannedTermStrings,
+		ExcludeStatuses: []models.JobStatus{
+			models.StatusRejected,
+			models.StatusApproved,
+			models.StatusGenerating,
+			models.StatusComplete,
+			models.StatusFailed,
+		},
 	}
 	jobs, err := s.store.ListJobs(r.Context(), user.ID, f)
 	if err != nil {
@@ -1209,7 +1236,14 @@ func (s *Server) respondJobAction(w http.ResponseWriter, r *http.Request, job *m
 		data := jobRowsData{Jobs: jobs, CSRFToken: csrf.Token(r)}
 
 		if r.Header.Get("HX-Target") == "job-card-deck" {
-			f.ExcludeStatuses = []models.JobStatus{models.StatusRejected}
+			f.Status = ""
+			f.ExcludeStatuses = []models.JobStatus{
+				models.StatusRejected,
+				models.StatusApproved,
+				models.StatusGenerating,
+				models.StatusComplete,
+				models.StatusFailed,
+			}
 			// Re-fetch jobs with exclude filter applied for card deck.
 			jobs, err = s.store.ListJobs(r.Context(), userID, f)
 			if err != nil {
