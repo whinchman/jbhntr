@@ -139,7 +139,7 @@ func (s *Store) CreateUserWithPassword(ctx context.Context, email, displayName, 
 		  (provider, provider_id, email, display_name, avatar_url, resume_markdown,
 		   onboarding_complete, last_login_at,
 		   password_hash, email_verified, email_verify_token, email_verify_expires_at)
-		VALUES ('email', '', $1, $2, '', '', 0, $3, $4, 0, $5, $6)
+		VALUES ('email', $1, $1, $2, '', '', 0, $3, $4, 0, $5, $6)
 		RETURNING id`,
 		email, displayName, now,
 		passwordHash, verifyToken, verifyExpiresAt.UTC().Format(time.RFC3339),
