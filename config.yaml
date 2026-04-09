@@ -7,7 +7,7 @@ ntfy:
 output:
     dir: ./output
 scraper:
-    interval: 1h
+    interval: 12h
     serpapi_key: ${SERPAPI_KEY}
 search_filters:
     - keywords: senior software engineer
